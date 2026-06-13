@@ -21,7 +21,13 @@
       "Bash(\"C:\\\\Users\\\\ZhiBai\\\\.cargo\\\\bin\\\\cargo.exe\" build *)",
       "Bash(\"C:\\\\Users\\\\ZhiBai\\\\.cargo\\\\bin\\\\cargo.exe\" check *)",
       "Bash(\"C:\\\\Users\\\\ZhiBai\\\\.cargo\\\\bin\\\\rustc.exe\" --edition 2021 test_model_refresh.rs --extern kiro_rs=\"F:\\\\ZhiKiroRs\\\\target\\\\debug\\\\kiro_rs.exe\" -L \"F:\\\\ZhiKiroRs\\\\target\\\\debug\\\\deps\" --out-dir .)",
-      "Bash(\"C:\\\\Users\\\\ZhiBai\\\\.cargo\\\\bin\\\\cargo.exe\" test *)"
+      "Bash(\"C:\\\\Users\\\\ZhiBai\\\\.cargo\\\\bin\\\\cargo.exe\" test *)",
+      "Bash(git commit -m 'feat: add ModelRefreshConfig to Config *)",
+      "Bash(xargs grep -l \"http_client\\\\|ProxyConfig\")",
+      "Bash(/c/Users/ZhiBai/.cargo/bin/cargo check *)",
+      "Bash(git restore *)",
+      "Bash(git commit *)",
+      "Bash(powershell.exe *)"
     ]
   }
 }

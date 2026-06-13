@@ -5,13 +5,11 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use parking_lot::RwLock;
-use tokio::time::{interval, Duration};
 
 use crate::kiro::api::list_available_models;
 use crate::kiro::model::{
-    EnrichedModel, ModelInfo, ModelMetadata, PricingInfo, StaticMetadataCollection,
+    EnrichedModel, ModelInfo, ModelMetadata, StaticMetadataCollection,
 };
-use crate::kiro::model::credentials::KiroCredentials;
 use crate::kiro::token_manager::MultiTokenManager;
 use crate::model::config::ModelRefreshConfig;
 
@@ -77,8 +75,165 @@ impl ModelService {
     }
 
     /// 获取指定账号支持的模型
-    pub fn get_account_models(&self, account_id: &str) -> Vec<ModelInfo> {
+    pub fn get_account_models(&self, _account_id: &str) -> Vec<ModelInfo> {
         // 待实现
         Vec::new()
+    }
+
+    /// 刷新指定账号的模型列表
+    pub async fn refresh_account(&self, account_id: u64) -> anyhow::Result<usize> {
+        // 获取该账号的 CallContext（包含凭据和 token）
+        let ctx = self.token_manager.acquire_context(None).await?;
+
+        // 验证是否是目标账号
+        if ctx.id != account_id {
+            anyhow::bail!("Account ID mismatch: expected {}, got {}", account_id, ctx.id);
+        }
+
+        // 获取代理配置（从凭据的 proxy_url 字段构建）
+        let proxy_config = if let Some(ref url) = ctx.credentials.proxy_url {
+            Some(crate::http_client::ProxyConfig {
+                url: url.clone(),
+                username: ctx.credentials.proxy_username.clone(),
+                password: ctx.credentials.proxy_password.clone(),
+            })
+        } else {
+            None
+        };
+
+        // 调用 API 获取模型列表
+        let models = list_available_models(
+            &ctx.credentials,
+            proxy_config.as_ref(),
+            self.config.tls_backend,
+        ).await?;
+
+        // 提取模型 ID 列表
+        let model_ids: Vec<String> = models.iter().map(|m| m.model_id.clone()).collect();
+
+        let account_id_str = account_id.to_string();
+
+        // 更新 account_models
+        {
+            let mut account_models = self.account_models.write();
+            account_models.insert(account_id_str.clone(), model_ids.clone());
+        }
+
+        // 合并到全局模型列表
+        self.merge_models_to_global(&models, &account_id_str).await;
+
+        // 清空缓存
+        self.clear_account_cache();
+
+        tracing::info!(
+            "Refreshed {} models for account: {}",
+            models.len(),
+            account_id
+        );
+
+        Ok(models.len())
+    }
+
+    /// 合并模型到全局列表
+    async fn merge_models_to_global(&self, models: &[ModelInfo], account_id: &str) {
+        let mut global_models = self.models.write();
+
+        for api_model in models {
+            // 查找是否已存在
+            if let Some(existing) = global_models
+                .iter_mut()
+                .find(|m| m.id == api_model.model_id)
+            {
+                // 更新账号列表
+                if !existing.available_accounts.contains(&account_id.to_string()) {
+                    existing.available_accounts.push(account_id.to_string());
+                }
+            } else {
+                // 创建新的 EnrichedModel
+                let enriched = self.enrich_model(api_model, account_id);
+                global_models.push(enriched);
+            }
+        }
+    }
+
+    /// 将 API 模型合并静态元数据
+    fn enrich_model(&self, api_model: &ModelInfo, account_id: &str) -> EnrichedModel {
+        let metadata = self.static_metadata.get(&api_model.model_id);
+
+        let supports_image = api_model.supports_image();
+        let input_modalities = EnrichedModel::build_input_modalities(supports_image);
+
+        EnrichedModel {
+            id: api_model.model_id.clone(),
+            object: "model".to_string(),
+            created: metadata.map(|m| m.created).unwrap_or(0),
+            owned_by: "anthropic".to_string(),
+            display_name: metadata
+                .map(|m| m.display_name.clone())
+                .unwrap_or_else(|| api_model.model_name.clone()),
+            model_type: metadata
+                .map(|m| m.model_type.clone())
+                .unwrap_or_else(|| "chat".to_string()),
+            max_tokens: api_model
+                .token_limits
+                .as_ref()
+                .map(|t| t.max_output_tokens)
+                .or_else(|| metadata.map(|m| m.max_output_tokens))
+                .unwrap_or(16384),
+            context_window: metadata.map(|m| m.context_window).unwrap_or(200000),
+            supports_image,
+            input_modalities,
+            pricing: metadata.and_then(|m| m.pricing.clone()),
+            available_accounts: vec![account_id.to_string()],
+        }
+    }
+
+    /// 清空账号过滤缓存
+    fn clear_account_cache(&self) {
+        let mut cache = self.model_accounts_cache.write();
+        cache.clear();
+        tracing::debug!("Cleared model accounts cache");
+    }
+
+    /// 刷新所有账号的模型列表
+    pub async fn refresh_all_accounts(&self) -> anyhow::Result<(usize, usize)> {
+        // 获取所有凭据的快照
+        let snapshot = self.token_manager.snapshot();
+
+        let mut total_accounts = 0;
+        let mut failed_accounts = 0;
+
+        // 清空全局模型列表
+        {
+            let mut models = self.models.write();
+            models.clear();
+        }
+
+        // 只刷新启用的账号
+        for entry in snapshot.entries.iter().filter(|e| !e.disabled) {
+            match self.refresh_account(entry.id).await {
+                Ok(_) => {
+                    total_accounts += 1;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to refresh account {}: {}", entry.id, e);
+                    failed_accounts += 1;
+                }
+            }
+        }
+
+        // 更新最后刷新时间
+        {
+            let mut last_refresh = self.last_refresh.write();
+            *last_refresh = Some(SystemTime::now());
+        }
+
+        tracing::info!(
+            "Refreshed models for {} accounts ({} failed)",
+            total_accounts,
+            failed_accounts
+        );
+
+        Ok((total_accounts, failed_accounts))
     }
 }

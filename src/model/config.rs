@@ -32,6 +32,10 @@ pub struct ModelRefreshConfig {
     /// 账号过滤缓存 TTL（秒）
     #[serde(default = "default_account_filter_cache_ttl")]
     pub account_filter_cache_ttl_seconds: u64,
+
+    /// TLS 后端
+    #[serde(default)]
+    pub tls_backend: TlsBackend,
 }
 
 fn default_model_refresh_enabled() -> bool {
@@ -52,6 +56,7 @@ impl Default for ModelRefreshConfig {
             enabled: default_model_refresh_enabled(),
             interval_seconds: default_model_refresh_interval(),
             account_filter_cache_ttl_seconds: default_account_filter_cache_ttl(),
+            tls_backend: TlsBackend::default(),
         }
     }
 }
