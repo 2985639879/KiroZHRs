@@ -27,7 +27,9 @@
       "Bash(/c/Users/ZhiBai/.cargo/bin/cargo check *)",
       "Bash(git restore *)",
       "Bash(git commit *)",
-      "Bash(powershell.exe *)"
+      "Bash(powershell.exe *)",
+      "Bash('C:\\\\Users\\\\ZhiBai/.cargo/bin/cargo.exe' build *)",
+      "Bash('C:\\\\Users\\\\ZhiBai/.cargo/bin/cargo.exe' test *)"
     ]
   }
 }

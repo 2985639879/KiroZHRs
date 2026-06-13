@@ -236,4 +236,63 @@ impl ModelService {
 
         Ok((total_accounts, failed_accounts))
     }
+
+    /// 获取支持指定模型的账号列表（带缓存）
+    pub fn get_accounts_for_model(&self, model_id: &str) -> Vec<String> {
+        // 1. 尝试从缓存读取
+        {
+            let cache = self.model_accounts_cache.read();
+            if let Some(cached) = cache.get(model_id) {
+                let elapsed = SystemTime::now()
+                    .duration_since(cached.cached_at)
+                    .unwrap_or_default();
+
+                // TTL 未过期，直接返回
+                if elapsed.as_secs() < self.config.account_filter_cache_ttl_seconds {
+                    tracing::debug!("Cache hit for model: {}", model_id);
+                    return cached.account_ids.clone();
+                }
+            }
+        }
+
+        // 2. 缓存未命中或过期，重新计算
+        tracing::debug!("Cache miss for model: {}", model_id);
+        let account_models = self.account_models.read();
+        let mut result = Vec::new();
+
+        for (account_id, models) in account_models.iter() {
+            if models.contains(&model_id.to_string()) {
+                result.push(account_id.clone());
+            }
+        }
+
+        // 3. 更新缓存
+        {
+            let mut cache = self.model_accounts_cache.write();
+            cache.insert(
+                model_id.to_string(),
+                CachedAccountList {
+                    account_ids: result.clone(),
+                    cached_at: SystemTime::now(),
+                },
+            );
+        }
+
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cached_account_list() {
+        let cached = CachedAccountList {
+            account_ids: vec!["account1".to_string(), "account2".to_string()],
+            cached_at: SystemTime::now(),
+        };
+
+        assert_eq!(cached.account_ids.len(), 2);
+    }
 }
