@@ -12,6 +12,7 @@
 
 pub mod common;
 pub mod credentials;
+pub mod enriched_model;
 pub mod events;
 pub mod model_info;
 pub mod model_metadata;
