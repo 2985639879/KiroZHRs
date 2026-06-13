@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m 'docs: add dynamic model loading system design *)",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(cargo build *)",
+      "Bash(~/.cargo/bin/cargo build *)",
+      "Bash(~/.cargo/bin/cargo test *)",
+      "Bash(git init *)",
+      "Bash(git commit -m ' *)",
+      "Read(//c/Users/ZhiBai/.cargo/bin/**)",
+      "Read(//c/Users/__TRACKED_VAR__/.cargo/bin/**)",
+      "Bash(/c/Users/ZhiBai/.cargo/bin/cargo.exe build *)",
+      "Bash(/c/Users/ZhiBai/.cargo/bin/cargo.exe test *)",
+      "Bash(python *)",
+      "Bash(where cargo *)",
+      "Bash(/c/Users/ZhiBai/.cargo/bin/cargo build *)",
+      "Bash(/c/Users/ZhiBai/.cargo/bin/cargo test *)",
+      "Bash(\"C:\\\\Users\\\\ZhiBai\\\\.cargo\\\\bin\\\\cargo.exe\" build *)",
+      "Bash(\"C:\\\\Users\\\\ZhiBai\\\\.cargo\\\\bin\\\\cargo.exe\" check *)",
+      "Bash(\"C:\\\\Users\\\\ZhiBai\\\\.cargo\\\\bin\\\\rustc.exe\" --edition 2021 test_model_refresh.rs --extern kiro_rs=\"F:\\\\ZhiKiroRs\\\\target\\\\debug\\\\kiro_rs.exe\" -L \"F:\\\\ZhiKiroRs\\\\target\\\\debug\\\\deps\" --out-dir .)",
+      "Bash(\"C:\\\\Users\\\\ZhiBai\\\\.cargo\\\\bin\\\\cargo.exe\" test *)"
+    ]
+  }
+}
