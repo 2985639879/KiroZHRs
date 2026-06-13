@@ -19,3 +19,8 @@ pub mod model_metadata;
 pub mod requests;
 pub mod token_refresh;
 pub mod usage_limits;
+
+// Public re-exports for convenient access
+pub use enriched_model::EnrichedModel;
+pub use model_info::{ModelInfo, TokenLimits};
+pub use model_metadata::{ModelMetadata, PricingInfo, StaticMetadataCollection};
