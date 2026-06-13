@@ -8,11 +8,13 @@
 //! - `token_refresh`: Token 刷新
 //! - `usage_limits`: 使用额度查询
 //! - `model_info`: 模型信息
+//! - `model_metadata`: 静态模型元数据
 
 pub mod common;
 pub mod credentials;
 pub mod events;
 pub mod model_info;
+pub mod model_metadata;
 pub mod requests;
 pub mod token_refresh;
 pub mod usage_limits;
