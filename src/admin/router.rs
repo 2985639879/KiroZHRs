@@ -10,6 +10,7 @@ use super::{
         add_credential, delete_credential, force_refresh_token, get_all_credentials,
         get_credential_balance, get_load_balancing_mode, reset_failure_count,
         set_credential_disabled, set_credential_priority, set_load_balancing_mode,
+        get_models, refresh_all_models, refresh_account_models,
     },
     middleware::{AdminState, admin_auth_middleware},
 };
@@ -27,6 +28,9 @@ use super::{
 /// - `GET /credentials/:id/balance` - 获取凭据余额
 /// - `GET /config/load-balancing` - 获取负载均衡模式
 /// - `PUT /config/load-balancing` - 设置负载均衡模式
+/// - `GET /models` - 获取所有模型列表
+/// - `POST /models/refresh` - 刷新所有账号的模型
+/// - `POST /models/refresh/:account_id` - 刷新指定账号的模型
 ///
 /// # 认证
 /// 需要 Admin API Key 认证，支持：
@@ -48,6 +52,9 @@ pub fn create_admin_router(state: AdminState) -> Router {
             "/config/load-balancing",
             get(get_load_balancing_mode).put(set_load_balancing_mode),
         )
+        .route("/models", get(get_models))
+        .route("/models/refresh", post(refresh_all_models))
+        .route("/models/refresh/{account_id}", post(refresh_account_models))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             admin_auth_middleware,

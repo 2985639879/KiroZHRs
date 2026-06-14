@@ -29,7 +29,22 @@
       "Bash(git commit *)",
       "Bash(powershell.exe *)",
       "Bash('C:\\\\Users\\\\ZhiBai/.cargo/bin/cargo.exe' build *)",
-      "Bash('C:\\\\Users\\\\ZhiBai/.cargo/bin/cargo.exe' test *)"
+      "Bash('C:\\\\Users\\\\ZhiBai/.cargo/bin/cargo.exe' test *)",
+      "Bash(cargo check *)",
+      "Bash(powershell *)",
+      "Bash(/c/Users/ZhiBai/.cargo/bin/cargo.exe check *)",
+      "Bash(awk 'NR>=622 && NR<=760' src/components/dashboard.tsx)",
+      "Bash(node -e ' *)",
+      "Bash(pnpm build *)",
+      "Bash(npx pnpm *)",
+      "Bash(npx tsc *)",
+      "Bash(timeout 5 /c/Users/ZhiBai/.cargo/bin/cargo.exe run)",
+      "Bash(timeout 10 /c/Users/ZhiBai/.cargo/bin/cargo.exe run)",
+      "Bash(timeout 8 /c/Users/ZhiBai/.cargo/bin/cargo.exe run)",
+      "Bash(cargo test *)",
+      "Bash(cargo.exe check *)",
+      "Bash(unzip -l KiroGo.zip)",
+      "Bash(unzip -q KiroGo.zip)"
     ]
   }
 }

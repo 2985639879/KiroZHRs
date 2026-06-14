@@ -153,15 +153,79 @@ async fn main() {
         api_url: config.count_tokens_api_url.clone(),
         api_key: config.count_tokens_api_key.clone(),
         auth_type: config.count_tokens_auth_type.clone(),
-        proxy: proxy_config,
+        proxy: proxy_config.clone(),
         tls_backend: config.tls_backend,
     });
 
+    // 创建模型服务并预加载模型
+    let model_service = kiro::ModelService::new(
+        token_manager.clone(),
+        config.model_refresh.clone(),
+    )
+    .unwrap_or_else(|e| {
+        tracing::error!("创建模型服务失败: {}", e);
+        std::process::exit(1);
+    });
+    let model_service = Arc::new(model_service);
+
+    // 将模型服务设置到 token_manager，用于账号过滤
+    token_manager.set_model_service(model_service.clone());
+
+    // 启动时预加载模型
+    tracing::info!("正在预加载模型列表...");
+    match model_service.refresh_all_accounts().await {
+        Ok((total, failed)) => {
+            tracing::info!(
+                "模型预加载完成: 成功 {} 个账号, 失败 {} 个账号",
+                total,
+                failed
+            );
+            if total == 0 && failed > 0 {
+                tracing::warn!("所有账号刷新失败，服务将继续运行但模型列表为空");
+            }
+        }
+        Err(e) => {
+            tracing::error!("模型预加载失败: {}", e);
+            tracing::warn!("服务将继续运行但模型列表为空");
+        }
+    }
+
+    // 启动后台自动刷新任务（如果已启用）
+    if config.model_refresh.enabled {
+        let model_service_bg = model_service.clone();
+        let interval = config.model_refresh.interval_seconds;
+        tokio::spawn(async move {
+            tracing::info!(
+                "后台模型刷新任务已启动，间隔: {} 秒",
+                interval
+            );
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(interval)).await;
+                tracing::debug!("执行定时模型刷新");
+                match model_service_bg.refresh_all_accounts().await {
+                    Ok((total, failed)) => {
+                        tracing::info!(
+                            "定时刷新完成: 成功 {} 个账号, 失败 {} 个账号",
+                            total,
+                            failed
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!("定时刷新失败: {}", e);
+                    }
+                }
+            }
+        });
+    } else {
+        tracing::info!("后台模型刷新已禁用");
+    }
+
     // 构建 Anthropic API 路由（profile_arn 由 provider 层根据实际凭据动态注入）
-    let anthropic_app = anthropic::create_router_with_provider(
+    let anthropic_app = anthropic::create_router_with_provider_and_model_service(
         &api_key,
         Some(kiro_provider),
         config.extract_thinking,
+        Some(model_service.clone()),
     );
 
     // 构建 Admin API 路由（如果配置了非空的 admin_api_key）
@@ -177,8 +241,8 @@ async fn main() {
             tracing::warn!("admin_api_key 配置为空，Admin API 未启用");
             anthropic_app
         } else {
-            let admin_service =
-                admin::AdminService::new(token_manager.clone(), endpoint_names.clone());
+            let admin_service = admin::AdminService::new(token_manager.clone(), endpoint_names.clone())
+                .with_model_service(model_service.clone());
             let admin_state = admin::AdminState::new(admin_key, admin_service);
             let admin_app = admin::create_admin_router(admin_state);
 
@@ -205,11 +269,14 @@ async fn main() {
     tracing::info!("  POST /v1/messages/count_tokens");
     if admin_key_valid {
         tracing::info!("Admin API:");
-        tracing::info!("  GET  /api/admin/credentials");
-        tracing::info!("  POST /api/admin/credentials/:index/disabled");
-        tracing::info!("  POST /api/admin/credentials/:index/priority");
-        tracing::info!("  POST /api/admin/credentials/:index/reset");
-        tracing::info!("  GET  /api/admin/credentials/:index/balance");
+        tracing::info!("  GET    /api/admin/credentials");
+        tracing::info!("  POST   /api/admin/credentials/:id/disabled");
+        tracing::info!("  POST   /api/admin/credentials/:id/priority");
+        tracing::info!("  POST   /api/admin/credentials/:id/reset");
+        tracing::info!("  GET    /api/admin/credentials/:id/balance");
+        tracing::info!("  GET    /api/admin/models");
+        tracing::info!("  POST   /api/admin/models/refresh");
+        tracing::info!("  POST   /api/admin/models/refresh/:account_id");
         tracing::info!("Admin UI:");
         tracing::info!("  GET  /admin");
     }

@@ -107,6 +107,25 @@ pub fn map_model(model: &str) -> Option<String> {
     }
 }
 
+/// 去掉模型名的 -thinking 后缀
+///
+/// Kiro API 不认识带 -thinking 的模型名。
+/// Thinking 模式通过 system prompt 中的标签实现。
+///
+/// # 示例
+///
+/// ```
+/// assert_eq!(strip_thinking_suffix("claude-sonnet-4.5-thinking"), "claude-sonnet-4.5");
+/// assert_eq!(strip_thinking_suffix("claude-sonnet-4.5"), "claude-sonnet-4.5");
+/// ```
+fn strip_thinking_suffix(model: &str) -> String {
+    if model.to_lowercase().ends_with("-thinking") {
+        model[..model.len() - 9].to_string()
+    } else {
+        model.to_string()
+    }
+}
+
 /// 根据模型名称返回对应的上下文窗口大小
 ///
 /// 复用 `map_model` 的映射逻辑，确保窗口大小判断与模型映射一致。
@@ -118,6 +137,88 @@ pub fn get_context_window_size(model: &str) -> i32 {
         _ => 200_000,
     }
 }
+
+/// 使用动态模型列表验证模型名称
+///
+/// 此函数尝试从可用模型列表中找到最佳匹配：
+/// 1. 精确匹配（忽略大小写）
+/// 2. 去掉 "-thinking" 后缀后匹配
+/// 3. 使用 map_model 映射后匹配
+///
+/// # 参数
+///
+/// * `model_name` - 请求的模型名称
+/// * `available_models` - 可用模型列表（通常从 ModelService.get_models() 获取）
+///
+/// # 返回
+///
+/// 返回匹配的模型 ID（Kiro 格式），如果没有匹配则返回 UnsupportedModel 错误
+fn validate_model_dynamic(
+    model_name: &str,
+    available_models: &[String],
+) -> Result<String, ConversionError> {
+    let model_lower = model_name.to_lowercase();
+
+    // 1. 精确匹配（忽略大小写）
+    for available in available_models {
+        if available.to_lowercase() == model_lower {
+            return Ok(available.clone());
+        }
+    }
+
+    // 2. 去掉 "-thinking" 后缀后匹配
+    if model_lower.ends_with("-thinking") {
+        let base_model = &model_lower[..model_lower.len() - 9]; // 去掉 "-thinking"
+
+        // 2.1 先尝试精确匹配基础模型名（比如 claude-sonnet-4.5）
+        for available in available_models {
+            if available.to_lowercase() == base_model {
+                // 返回原始模型名（保留 -thinking 后缀），而不是匹配到的基础模型
+                // 这样 override_thinking_from_model_name 才能检测到并启用 thinking 模式
+                tracing::debug!(
+                    requested = %model_name,
+                    base_model = %base_model,
+                    matched_available = %available,
+                    returning = %model_name,
+                    "动态验证: 精确匹配到基础模型，返回带 -thinking 的原始模型名"
+                );
+                return Ok(model_name.to_string());
+            }
+        }
+
+        // 2.2 如果精确匹配失败，尝试使用 map_model 映射基础模型名
+        // 这样可以处理像 claude-sonnet-4-5-20250929-thinking 这样的完整版本号
+        if let Some(mapped) = map_model(base_model) {
+            for available in available_models {
+                if available.to_lowercase() == mapped.to_lowercase() {
+                    tracing::debug!(
+                        requested = %model_name,
+                        base_model = %base_model,
+                        mapped = %mapped,
+                        matched_available = %available,
+                        returning = %model_name,
+                        "动态验证: 通过 map_model 映射基础模型后匹配成功，返回带 -thinking 的原始模型名"
+                    );
+                    return Ok(model_name.to_string());
+                }
+            }
+        }
+    }
+
+    // 3. 尝试使用 map_model 映射原始模型名（不带 -thinking 后缀的情况）
+    if let Some(mapped) = map_model(model_name) {
+        // 检查映射后的模型是否在可用列表中
+        for available in available_models {
+            if available.to_lowercase() == mapped.to_lowercase() {
+                return Ok(available.clone());
+            }
+        }
+    }
+
+    // 没有找到匹配的模型
+    Err(ConversionError::UnsupportedModel(model_name.to_string()))
+}
+
 
 /// 转换结果
 #[derive(Debug)]
@@ -219,12 +320,38 @@ fn create_placeholder_tool(name: &str) -> Tool {
 }
 
 /// 将 Anthropic 请求转换为 Kiro 请求
-pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, ConversionError> {
-    // 1. 映射模型
-    let model_id = map_model(&req.model)
-        .ok_or_else(|| ConversionError::UnsupportedModel(req.model.clone()))?;
+///
+/// # 参数
+///
+/// * `req` - Anthropic 格式的消息请求
+/// * `available_models` - 可选的可用模型列表（用于动态验证）。如果为 None，则回退到硬编码的模型映射
+pub fn convert_request(
+    req: &MessagesRequest,
+    available_models: Option<&[String]>,
+) -> Result<ConversionResult, ConversionError> {
+    // 1. 映射和验证模型
+    let validated_model = if let Some(models) = available_models {
+        // 使用动态模型列表验证
+        validate_model_dynamic(&req.model, models)?
+    } else {
+        // 回退到硬编码映射
+        map_model(&req.model)
+            .ok_or_else(|| ConversionError::UnsupportedModel(req.model.clone()))?
+    };
 
-    // 2. 检查消息列表
+    // 2. 去掉 -thinking 后缀，得到真实的 Kiro 模型 ID
+    // Kiro API 不认识带 -thinking 的模型名
+    // thinking 模式通过 system prompt 中的标签实现，而不是模型名
+    let model_id = strip_thinking_suffix(&validated_model);
+
+    tracing::debug!(
+        original_model = %req.model,
+        validated_model = %validated_model,
+        kiro_model_id = %model_id,
+        "模型名转换"
+    );
+
+    // 3. 检查消息列表
     if req.messages.is_empty() {
         return Err(ConversionError::EmptyMessages);
     }
@@ -1107,7 +1234,7 @@ mod tests {
             metadata: None,
         };
 
-        let result = convert_request(&req).unwrap();
+        let result = convert_request(&req, None).unwrap();
 
         // 应该有映射
         assert_eq!(result.tool_name_map.len(), 1);
@@ -1170,7 +1297,7 @@ mod tests {
             metadata: None,
         };
 
-        let result = convert_request(&req).unwrap();
+        let result = convert_request(&req, None).unwrap();
         let short_name = result.tool_name_map.iter().next().unwrap().0.clone();
 
         // 历史中 assistant 消息的 tool_use name 也应该被映射
@@ -1227,7 +1354,7 @@ mod tests {
             metadata: None,
         };
 
-        let result = convert_request(&req).unwrap();
+        let result = convert_request(&req, None).unwrap();
 
         // 验证 tools 列表中包含了历史中使用的工具的占位符定义
         let tools = &result
@@ -1315,7 +1442,7 @@ mod tests {
             }),
         };
 
-        let result = convert_request(&req).unwrap();
+        let result = convert_request(&req, None).unwrap();
         assert_eq!(
             result.conversation_state.conversation_id,
             "a0662283-7fd3-4399-a7eb-52b9a717ae88"
@@ -1343,7 +1470,7 @@ mod tests {
             metadata: None,
         };
 
-        let result = convert_request(&req).unwrap();
+        let result = convert_request(&req, None).unwrap();
         // 验证生成的是有效的 UUID 格式
         assert_eq!(result.conversation_state.conversation_id.len(), 36);
         assert_eq!(
@@ -1773,7 +1900,7 @@ mod tests {
             metadata: None,
         };
 
-        let result = convert_request(&req);
+        let result = convert_request(&req, None);
         assert!(result.is_ok(), "连续 assistant 消息场景不应报错: {:?}", result.err());
 
         let state = result.unwrap().conversation_state;
@@ -1789,5 +1916,221 @@ mod tests {
             }
         }
         assert!(found_tool_use, "合并后的 assistant 消息应包含 tool_use");
+    }
+
+    #[test]
+    fn test_validate_model_dynamic_exact_match() {
+        use super::super::types::Message as AnthropicMessage;
+
+        let available_models = vec![
+            "claude-opus-4.8".to_string(),
+            "claude-sonnet-4.6".to_string(),
+            "claude-haiku-4.5".to_string(),
+        ];
+
+        let req = MessagesRequest {
+            model: "claude-sonnet-4.6".to_string(),
+            max_tokens: 1024,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("Hello"),
+            }],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            stream: false,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+
+        let result = convert_request(&req, Some(&available_models));
+        assert!(result.is_ok(), "精确匹配应该成功");
+        let state = result.unwrap().conversation_state;
+        assert_eq!(
+            state.current_message.user_input_message.model_id,
+            "claude-sonnet-4.6"
+        );
+    }
+
+    #[test]
+    fn test_validate_model_dynamic_thinking_suffix() {
+        use super::super::types::Message as AnthropicMessage;
+
+        let available_models = vec![
+            "claude-opus-4.8".to_string(),
+            "claude-opus-4.8-thinking".to_string(),
+            "claude-sonnet-4.6".to_string(),
+            "claude-sonnet-4.6-thinking".to_string(),
+        ];
+
+        let req = MessagesRequest {
+            model: "claude-sonnet-4.6-thinking".to_string(),
+            max_tokens: 1024,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("Hello"),
+            }],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            stream: false,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+
+        let result = convert_request(&req, Some(&available_models));
+        assert!(result.is_ok(), "带 -thinking 后缀应该匹配");
+        let state = result.unwrap().conversation_state;
+        // 重要：模型ID应该保留 -thinking 后缀，以便后续逻辑能检测到
+        assert_eq!(
+            state.current_message.user_input_message.model_id,
+            "claude-sonnet-4.6-thinking",
+            "应该保留 -thinking 后缀"
+        );
+    }
+
+    #[test]
+    fn test_validate_model_dynamic_case_insensitive() {
+        use super::super::types::Message as AnthropicMessage;
+
+        let available_models = vec!["claude-sonnet-4.6".to_string()];
+
+        let req = MessagesRequest {
+            model: "Claude-Sonnet-4.6".to_string(), // 大小写混合
+            max_tokens: 1024,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("Hello"),
+            }],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            stream: false,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+
+        let result = convert_request(&req, Some(&available_models));
+        assert!(result.is_ok(), "大小写不敏感匹配应该成功");
+        let state = result.unwrap().conversation_state;
+        assert_eq!(
+            state.current_message.user_input_message.model_id,
+            "claude-sonnet-4.6"
+        );
+    }
+
+    #[test]
+    fn test_validate_model_dynamic_unsupported() {
+        use super::super::types::Message as AnthropicMessage;
+
+        let available_models = vec!["claude-sonnet-4.6".to_string()];
+
+        let req = MessagesRequest {
+            model: "claude-sonnet-4".to_string(), // 不支持的模型
+            max_tokens: 1024,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("Hello"),
+            }],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            stream: false,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+
+        let result = convert_request(&req, Some(&available_models));
+        assert!(result.is_err(), "不支持的模型应该返回错误");
+        assert!(matches!(result.unwrap_err(), ConversionError::UnsupportedModel(_)));
+    }
+
+    #[test]
+    fn test_validate_model_dynamic_with_map_model_fallback() {
+        use super::super::types::Message as AnthropicMessage;
+
+        let available_models = vec!["claude-sonnet-4.5".to_string()];
+
+        // 使用完整版本号，应该通过 map_model 映射到 "claude-sonnet-4.5"
+        let req = MessagesRequest {
+            model: "claude-sonnet-4-5-20250929".to_string(),
+            max_tokens: 1024,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("Hello"),
+            }],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            stream: false,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+
+        let result = convert_request(&req, Some(&available_models));
+        assert!(result.is_ok(), "应该通过 map_model 映射成功");
+        let state = result.unwrap().conversation_state;
+        assert_eq!(
+            state.current_message.user_input_message.model_id,
+            "claude-sonnet-4.5"
+        );
+    }
+
+    #[test]
+    fn test_strip_thinking_suffix() {
+        assert_eq!(
+            strip_thinking_suffix("claude-sonnet-4.5-thinking"),
+            "claude-sonnet-4.5"
+        );
+        assert_eq!(
+            strip_thinking_suffix("claude-sonnet-4.5"),
+            "claude-sonnet-4.5"
+        );
+        assert_eq!(
+            strip_thinking_suffix("Claude-Opus-4.6-Thinking"),
+            "Claude-Opus-4.6"
+        );
+    }
+
+    #[test]
+    fn test_convert_request_strips_thinking_suffix() {
+        use super::super::types::Message as AnthropicMessage;
+
+        let available_models = vec![
+            "claude-sonnet-4.6".to_string(),
+            "claude-sonnet-4.6-thinking".to_string(),
+        ];
+
+        let req = MessagesRequest {
+            model: "claude-sonnet-4.6-thinking".to_string(),
+            max_tokens: 1024,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: serde_json::json!("Hello"),
+            }],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            stream: false,
+            thinking: None,
+            output_config: None,
+            metadata: None,
+        };
+
+        let result = convert_request(&req, Some(&available_models));
+        assert!(result.is_ok(), "转换应该成功");
+
+        let state = result.unwrap().conversation_state;
+        // Kiro API 不认识带 -thinking 的模型，应该去掉后缀
+        assert_eq!(
+            state.current_message.user_input_message.model_id,
+            "claude-sonnet-4.6",
+            "发送给 Kiro 的模型名应该去掉 -thinking 后缀"
+        );
     }
 }

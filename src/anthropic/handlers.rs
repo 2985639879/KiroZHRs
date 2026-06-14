@@ -70,9 +70,50 @@ fn map_provider_error(err: Error) -> Response {
 /// GET /v1/models
 ///
 /// 返回可用的模型列表
-pub async fn get_models() -> impl IntoResponse {
+pub async fn get_models(State(state): State<AppState>) -> impl IntoResponse {
     tracing::info!("Received GET /v1/models request");
 
+    // 如果有 ModelService，从中获取模型列表
+    if let Some(model_service) = &state.model_service {
+        let enriched_models = model_service.get_models();
+
+        // 转换为 OpenAI 兼容格式，并为每个模型生成 -thinking 变体
+        let mut models: Vec<Model> = Vec::new();
+
+        for m in enriched_models {
+            // 添加基础模型
+            models.push(Model {
+                id: m.id.clone(),
+                object: m.object.clone(),
+                created: m.created as i64,
+                owned_by: m.owned_by.clone(),
+                display_name: m.display_name.clone(),
+                model_type: m.model_type.clone(),
+                max_tokens: m.max_tokens as i32,
+            });
+
+            // 为支持 thinking 的模型添加 -thinking 变体
+            // 所有 Claude 4.x 模型都支持 thinking 模式
+            if m.id.starts_with("claude-") {
+                models.push(Model {
+                    id: format!("{}-thinking", m.id),
+                    object: m.object,
+                    created: m.created as i64,
+                    owned_by: m.owned_by,
+                    display_name: format!("{} (Thinking)", m.display_name),
+                    model_type: m.model_type,
+                    max_tokens: m.max_tokens as i32,
+                });
+            }
+        }
+
+        return Json(ModelsResponse {
+            object: "list".to_string(),
+            data: models,
+        });
+    }
+
+    // 回退到硬编码列表（向后兼容）
     let models = vec![
         Model {
             id: "claude-opus-4-8".to_string(),
@@ -215,6 +256,13 @@ pub async fn post_messages(
     State(state): State<AppState>,
     JsonExtractor(mut payload): JsonExtractor<MessagesRequest>,
 ) -> Response {
+    // 添加调试日志：记录原始请求的模型名
+    tracing::debug!(
+        raw_model = %payload.model,
+        has_thinking_config = ?payload.thinking.is_some(),
+        "原始请求数据"
+    );
+
     tracing::info!(
         model = %payload.model,
         max_tokens = %payload.max_tokens,
@@ -239,7 +287,16 @@ pub async fn post_messages(
     };
 
     // 检测模型名是否包含 "thinking" 后缀，若包含则覆写 thinking 配置
+    let original_model = payload.model.clone();
     override_thinking_from_model_name(&mut payload);
+
+    if original_model != payload.model {
+        tracing::info!(
+            original_model = %original_model,
+            new_model = %payload.model,
+            "模型名被 override_thinking_from_model_name 修改"
+        );
+    }
 
     // 检查是否为 WebSearch 请求
     if websearch::has_web_search_tool(&payload) {
@@ -256,8 +313,22 @@ pub async fn post_messages(
         return websearch::handle_websearch_request(provider, &payload, input_tokens).await;
     }
 
-    // 转换请求
-    let conversion_result = match convert_request(&payload) {
+    // 转换请求，传递可用模型列表用于动态验证
+    let available_models = state
+        .model_service
+        .as_ref()
+        .map(|service| {
+            service
+                .get_models()
+                .iter()
+                .map(|m| m.id.clone())
+                .collect::<Vec<_>>()
+        });
+
+    let conversion_result = match convert_request(
+        &payload,
+        available_models.as_ref().map(|v| v.as_slice()),
+    ) {
         Ok(result) => result,
         Err(e) => {
             let (error_type, message) = match &e {
@@ -752,7 +823,16 @@ pub async fn post_messages_cc(
     };
 
     // 检测模型名是否包含 "thinking" 后缀，若包含则覆写 thinking 配置
+    let original_model = payload.model.clone();
     override_thinking_from_model_name(&mut payload);
+
+    if original_model != payload.model {
+        tracing::info!(
+            original_model = %original_model,
+            new_model = %payload.model,
+            "模型名被 override_thinking_from_model_name 修改"
+        );
+    }
 
     // 检查是否为 WebSearch 请求
     if websearch::has_web_search_tool(&payload) {
@@ -769,8 +849,22 @@ pub async fn post_messages_cc(
         return websearch::handle_websearch_request(provider, &payload, input_tokens).await;
     }
 
-    // 转换请求
-    let conversion_result = match convert_request(&payload) {
+    // 转换请求，传递可用模型列表用于动态验证
+    let available_models = state
+        .model_service
+        .as_ref()
+        .map(|service| {
+            service
+                .get_models()
+                .iter()
+                .map(|m| m.id.clone())
+                .collect::<Vec<_>>()
+        });
+
+    let conversion_result = match convert_request(
+        &payload,
+        available_models.as_ref().map(|v| v.as_slice()),
+    ) {
         Ok(result) => result,
         Err(e) => {
             let (error_type, message) = match &e {

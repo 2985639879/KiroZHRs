@@ -1,6 +1,6 @@
 //! 模型服务 - 管理模型缓存和账号映射
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -16,7 +16,7 @@ use crate::model::config::ModelRefreshConfig;
 /// 缓存的账号列表（用于模型→账号映射）
 #[derive(Debug, Clone)]
 struct CachedAccountList {
-    account_ids: Vec<String>,
+    account_ids: HashSet<String>,
     cached_at: SystemTime,
 }
 
@@ -82,31 +82,67 @@ impl ModelService {
 
     /// 刷新指定账号的模型列表
     pub async fn refresh_account(&self, account_id: u64) -> anyhow::Result<usize> {
-        // 获取该账号的 CallContext（包含凭据和 token）
-        let ctx = self.token_manager.acquire_context(None).await?;
-
-        // 验证是否是目标账号
-        if ctx.id != account_id {
-            anyhow::bail!("Account ID mismatch: expected {}, got {}", account_id, ctx.id);
-        }
+        // 从Token管理器获取该账号的凭据
+        let mut credentials = self
+            .token_manager
+            .get_credentials_by_id(account_id)
+            .ok_or_else(|| anyhow::anyhow!("Account {} not found", account_id))?;
 
         // 获取代理配置（从凭据的 proxy_url 字段构建）
-        let proxy_config = if let Some(ref url) = ctx.credentials.proxy_url {
+        let proxy_config = if let Some(ref url) = credentials.proxy_url {
             Some(crate::http_client::ProxyConfig {
                 url: url.clone(),
-                username: ctx.credentials.proxy_username.clone(),
-                password: ctx.credentials.proxy_password.clone(),
+                username: credentials.proxy_username.clone(),
+                password: credentials.proxy_password.clone(),
             })
         } else {
             None
         };
 
-        // 调用 API 获取模型列表
-        let models = list_available_models(
-            &ctx.credentials,
+        // 调用 API 获取模型列表，如果失败则尝试刷新token后重试
+        let models = match list_available_models(
+            &credentials,
             proxy_config.as_ref(),
             self.config.tls_backend,
-        ).await?;
+        )
+        .await
+        {
+            Ok(models) => models,
+            Err(e) => {
+                // 检查是否是认证错误（403）
+                let error_msg = e.to_string();
+                if error_msg.contains("403") || error_msg.contains("Forbidden") {
+                    tracing::info!(
+                        "Account {} token invalid, attempting to refresh...",
+                        account_id
+                    );
+
+                    // 强制刷新该账号的token
+                    if let Err(refresh_err) = self.token_manager.force_refresh_token_for(account_id).await
+                    {
+                        tracing::warn!(
+                            "Failed to refresh token for account {}: {}",
+                            account_id,
+                            refresh_err
+                        );
+                        return Err(e);
+                    }
+
+                    // 获取刷新后的凭据
+                    credentials = self
+                        .token_manager
+                        .get_credentials_by_id(account_id)
+                        .ok_or_else(|| anyhow::anyhow!("Account {} not found after refresh", account_id))?;
+
+                    // 重试获取模型列表
+                    tracing::info!("Retrying to fetch models for account {}", account_id);
+                    list_available_models(&credentials, proxy_config.as_ref(), self.config.tls_backend)
+                        .await?
+                } else {
+                    return Err(e);
+                }
+            }
+        };
 
         // 提取模型 ID 列表
         let model_ids: Vec<String> = models.iter().map(|m| m.model_id.clone()).collect();
@@ -250,7 +286,7 @@ impl ModelService {
                 // TTL 未过期，直接返回
                 if elapsed.as_secs() < self.config.account_filter_cache_ttl_seconds {
                     tracing::debug!("Cache hit for model: {}", model_id);
-                    return cached.account_ids.clone();
+                    return cached.account_ids.iter().cloned().collect();
                 }
             }
         }
@@ -258,11 +294,11 @@ impl ModelService {
         // 2. 缓存未命中或过期，重新计算
         tracing::debug!("Cache miss for model: {}", model_id);
         let account_models = self.account_models.read();
-        let mut result = Vec::new();
+        let mut result = HashSet::new();
 
         for (account_id, models) in account_models.iter() {
             if models.contains(&model_id.to_string()) {
-                result.push(account_id.clone());
+                result.insert(account_id.clone());
             }
         }
 
@@ -278,7 +314,69 @@ impl ModelService {
             );
         }
 
-        result
+        result.into_iter().collect()
+    }
+
+    /// 从公开数据源更新缺失的模型元数据（上下文长度等）
+    ///
+    /// 此方法会自动从 LiteLLM 等公开数据源获取模型的技术参数
+    pub async fn update_metadata_from_public_sources(&self) -> anyhow::Result<usize> {
+        use crate::kiro::metadata_updater::MetadataUpdater;
+
+        let updater = MetadataUpdater::new();
+        let metadata_map = updater.fetch_metadata().await?;
+
+        let mut updated_count = 0;
+        {
+            let mut models = self.models.write();
+
+            for model in models.iter_mut() {
+                if let Some(fetched) = metadata_map.get(&model.id) {
+                    let mut updated = false;
+
+                    // 更新上下文窗口（如果当前为0或缺失）
+                    if model.context_window == 0 {
+                        if let Some(context_window) = fetched.context_window {
+                            model.context_window = context_window;
+                            updated = true;
+                        }
+                    }
+
+                    // 更新最大输出tokens（如果当前为0或缺失）
+                    if model.max_tokens == 0 {
+                        if let Some(max_output) = fetched.max_output_tokens {
+                            model.max_tokens = max_output;
+                            updated = true;
+                        }
+                    }
+
+                    // 更新 vision 支持
+                    if fetched.supports_vision && !model.supports_image {
+                        model.supports_image = true;
+                        model.input_modalities =
+                            crate::kiro::model::EnrichedModel::build_input_modalities(true);
+                        updated = true;
+                    }
+
+                    if updated {
+                        updated_count += 1;
+                        tracing::info!(
+                            "Updated metadata for {}: context={}, max_output={}, vision={}",
+                            model.id,
+                            model.context_window,
+                            model.max_tokens,
+                            model.supports_image
+                        );
+                    }
+                }
+            }
+        }
+
+        tracing::info!(
+            "Updated metadata for {} models from public sources",
+            updated_count
+        );
+        Ok(updated_count)
     }
 }
 
@@ -289,10 +387,28 @@ mod tests {
     #[test]
     fn test_cached_account_list() {
         let cached = CachedAccountList {
-            account_ids: vec!["account1".to_string(), "account2".to_string()],
+            account_ids: ["account1".to_string(), "account2".to_string()]
+                .into_iter()
+                .collect(),
             cached_at: SystemTime::now(),
         };
 
         assert_eq!(cached.account_ids.len(), 2);
+    }
+
+    #[test]
+    fn test_get_accounts_for_model_with_cache() {
+        // 这个测试需要一个完整的 ModelService 实例
+        // 由于涉及 MultiTokenManager 的创建，这里只测试缓存结构本身
+        let cached = CachedAccountList {
+            account_ids: ["1".to_string(), "2".to_string()].into_iter().collect(),
+            cached_at: SystemTime::now(),
+        };
+
+        // 验证缓存时间在合理范围内
+        let elapsed = SystemTime::now()
+            .duration_since(cached.cached_at)
+            .unwrap();
+        assert!(elapsed.as_secs() < 1);
     }
 }

@@ -1,17 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
-import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2 } from 'lucide-react'
+import { RefreshCw, LogOut, Moon, Sun, Server, Plus, Upload, FileUp, Trash2, RotateCcw, CheckCircle2, Database } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { storage } from '@/lib/storage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CredentialCard } from '@/components/credential-card'
 import { BalanceDialog } from '@/components/balance-dialog'
 import { AddCredentialDialog } from '@/components/add-credential-dialog'
 import { BatchImportDialog } from '@/components/batch-import-dialog'
 import { KamImportDialog } from '@/components/kam-import-dialog'
 import { BatchVerifyDialog, type VerifyResult } from '@/components/batch-verify-dialog'
+import { ModelsPage } from '@/components/models-page'
 import { useCredentials, useDeleteCredential, useResetFailure, useLoadBalancingMode, useSetLoadBalancingMode } from '@/hooks/use-credentials'
 import { getCredentialBalance, forceRefreshToken } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
@@ -40,6 +42,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [batchRefreshProgress, setBatchRefreshProgress] = useState({ current: 0, total: 0 })
   const cancelVerifyRef = useRef(false)
   const [currentPage, setCurrentPage] = useState(1)
+  const [activeTab, setActiveTab] = useState('credentials')
   const itemsPerPage = 12
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -569,182 +572,198 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
       {/* 主内容 */}
       <main className="container mx-auto px-4 md:px-8 py-6">
-        {/* 统计卡片 */}
-        <div className="grid gap-4 md:grid-cols-3 mb-6">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                凭据总数
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{data?.total || 0}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                可用凭据
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{data?.available || 0}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                当前活跃
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold flex items-center gap-2">
-                #{data?.currentId || '-'}
-                <Badge variant="success">活跃</Badge>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="credentials">Credentials</TabsTrigger>
+            <TabsTrigger value="models" className="gap-2">
+              <Database className="h-4 w-4" />
+              Models
+            </TabsTrigger>
+          </TabsList>
 
-        {/* 凭据列表 */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <h2 className="text-xl font-semibold">凭据管理</h2>
-              {selectedIds.size > 0 && (
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary">已选择 {selectedIds.size} 个</Badge>
-                  <Button onClick={deselectAll} size="sm" variant="ghost">
-                    取消选择
+          <TabsContent value="credentials" className="space-y-6">
+            {/* 统计卡片 */}
+            <div className="grid gap-4 md:grid-cols-3">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    凭据总数
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{data?.total || 0}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    可用凭据
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">{data?.available || 0}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    当前活跃
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold flex items-center gap-2">
+                    #{data?.currentId || '-'}
+                    <Badge variant="success">活跃</Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* 凭据列表 */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <h2 className="text-xl font-semibold">凭据管理</h2>
+                  {selectedIds.size > 0 && (
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">已选择 {selectedIds.size} 个</Badge>
+                      <Button onClick={deselectAll} size="sm" variant="ghost">
+                        取消选择
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {selectedIds.size > 0 && (
+                    <>
+                      <Button onClick={handleBatchVerify} size="sm" variant="outline">
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        批量验活
+                      </Button>
+                      <Button
+                        onClick={handleBatchForceRefresh}
+                        size="sm"
+                        variant="outline"
+                        disabled={batchRefreshing}
+                      >
+                        <RefreshCw className={`h-4 w-4 mr-2 ${batchRefreshing ? 'animate-spin' : ''}`} />
+                        {batchRefreshing ? `刷新中... ${batchRefreshProgress.current}/${batchRefreshProgress.total}` : '批量刷新 Token'}
+                      </Button>
+                      <Button onClick={handleBatchResetFailure} size="sm" variant="outline">
+                        <RotateCcw className="h-4 w-4 mr-2" />
+                        恢复异常
+                      </Button>
+                      <Button
+                        onClick={handleBatchDelete}
+                        size="sm"
+                        variant="destructive"
+                        disabled={selectedDisabledCount === 0}
+                        title={selectedDisabledCount === 0 ? '只能删除已禁用凭据' : undefined}
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        批量删除
+                      </Button>
+                    </>
+                  )}
+                  {verifying && !verifyDialogOpen && (
+                    <Button onClick={() => setVerifyDialogOpen(true)} size="sm" variant="secondary">
+                      <CheckCircle2 className="h-4 w-4 mr-2 animate-spin" />
+                      验活中... {verifyProgress.current}/{verifyProgress.total}
+                    </Button>
+                  )}
+                  {data?.credentials && data.credentials.length > 0 && (
+                    <Button
+                      onClick={handleQueryCurrentPageInfo}
+                      size="sm"
+                      variant="outline"
+                      disabled={queryingInfo}
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-2 ${queryingInfo ? 'animate-spin' : ''}`} />
+                      {queryingInfo ? `查询中... ${queryInfoProgress.current}/${queryInfoProgress.total}` : '查询信息'}
+                    </Button>
+                  )}
+                  {data?.credentials && data.credentials.length > 0 && (
+                    <Button
+                      onClick={handleClearAll}
+                      size="sm"
+                      variant="outline"
+                      className="text-destructive hover:text-destructive"
+                      disabled={disabledCredentialCount === 0}
+                      title={disabledCredentialCount === 0 ? '没有可清除的已禁用凭据' : undefined}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      清除已禁用
+                    </Button>
+                  )}
+                  <Button onClick={() => setKamImportDialogOpen(true)} size="sm" variant="outline">
+                    <FileUp className="h-4 w-4 mr-2" />
+                    Kiro Account Manager 导入
+                  </Button>
+                  <Button onClick={() => setBatchImportDialogOpen(true)} size="sm" variant="outline">
+                    <Upload className="h-4 w-4 mr-2" />
+                    批量导入
+                  </Button>
+                  <Button onClick={() => setAddDialogOpen(true)} size="sm">
+                    <Plus className="h-4 w-4 mr-2" />
+                    添加凭据
                   </Button>
                 </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              {selectedIds.size > 0 && (
+              </div>
+              {data?.credentials.length === 0 ? (
+                <Card>
+                  <CardContent className="py-8 text-center text-muted-foreground">
+                    暂无凭据
+                  </CardContent>
+                </Card>
+              ) : (
                 <>
-                  <Button onClick={handleBatchVerify} size="sm" variant="outline">
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    批量验活
-                  </Button>
-                  <Button
-                    onClick={handleBatchForceRefresh}
-                    size="sm"
-                    variant="outline"
-                    disabled={batchRefreshing}
-                  >
-                    <RefreshCw className={`h-4 w-4 mr-2 ${batchRefreshing ? 'animate-spin' : ''}`} />
-                    {batchRefreshing ? `刷新中... ${batchRefreshProgress.current}/${batchRefreshProgress.total}` : '批量刷新 Token'}
-                  </Button>
-                  <Button onClick={handleBatchResetFailure} size="sm" variant="outline">
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    恢复异常
-                  </Button>
-                  <Button
-                    onClick={handleBatchDelete}
-                    size="sm"
-                    variant="destructive"
-                    disabled={selectedDisabledCount === 0}
-                    title={selectedDisabledCount === 0 ? '只能删除已禁用凭据' : undefined}
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    批量删除
-                  </Button>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {currentCredentials.map((credential) => (
+                      <CredentialCard
+                        key={credential.id}
+                        credential={credential}
+                        onViewBalance={handleViewBalance}
+                        selected={selectedIds.has(credential.id)}
+                        onToggleSelect={() => toggleSelect(credential.id)}
+                        balance={balanceMap.get(credential.id) || null}
+                        loadingBalance={loadingBalanceIds.has(credential.id)}
+                      />
+                    ))}
+                  </div>
+
+                  {/* 分页控件 */}
+                  {totalPages > 1 && (
+                    <div className="flex justify-center items-center gap-4 mt-6">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        上一页
+                      </Button>
+                      <span className="text-sm text-muted-foreground">
+                        第 {currentPage} / {totalPages} 页（共 {data?.credentials.length} 个凭据）
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                      >
+                        下一页
+                      </Button>
+                    </div>
+                  )}
                 </>
               )}
-              {verifying && !verifyDialogOpen && (
-                <Button onClick={() => setVerifyDialogOpen(true)} size="sm" variant="secondary">
-                  <CheckCircle2 className="h-4 w-4 mr-2 animate-spin" />
-                  验活中... {verifyProgress.current}/{verifyProgress.total}
-                </Button>
-              )}
-              {data?.credentials && data.credentials.length > 0 && (
-                <Button
-                  onClick={handleQueryCurrentPageInfo}
-                  size="sm"
-                  variant="outline"
-                  disabled={queryingInfo}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${queryingInfo ? 'animate-spin' : ''}`} />
-                  {queryingInfo ? `查询中... ${queryInfoProgress.current}/${queryInfoProgress.total}` : '查询信息'}
-                </Button>
-              )}
-              {data?.credentials && data.credentials.length > 0 && (
-                <Button
-                  onClick={handleClearAll}
-                  size="sm"
-                  variant="outline"
-                  className="text-destructive hover:text-destructive"
-                  disabled={disabledCredentialCount === 0}
-                  title={disabledCredentialCount === 0 ? '没有可清除的已禁用凭据' : undefined}
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  清除已禁用
-                </Button>
-              )}
-              <Button onClick={() => setKamImportDialogOpen(true)} size="sm" variant="outline">
-                <FileUp className="h-4 w-4 mr-2" />
-                Kiro Account Manager 导入
-              </Button>
-              <Button onClick={() => setBatchImportDialogOpen(true)} size="sm" variant="outline">
-                <Upload className="h-4 w-4 mr-2" />
-                批量导入
-              </Button>
-              <Button onClick={() => setAddDialogOpen(true)} size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                添加凭据
-              </Button>
             </div>
-          </div>
-          {data?.credentials.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
-                暂无凭据
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {currentCredentials.map((credential) => (
-                  <CredentialCard
-                    key={credential.id}
-                    credential={credential}
-                    onViewBalance={handleViewBalance}
-                    selected={selectedIds.has(credential.id)}
-                    onToggleSelect={() => toggleSelect(credential.id)}
-                    balance={balanceMap.get(credential.id) || null}
-                    loadingBalance={loadingBalanceIds.has(credential.id)}
-                  />
-                ))}
-              </div>
+          </TabsContent>
 
-              {/* 分页控件 */}
-              {totalPages > 1 && (
-                <div className="flex justify-center items-center gap-4 mt-6">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    上一页
-                  </Button>
-                  <span className="text-sm text-muted-foreground">
-                    第 {currentPage} / {totalPages} 页（共 {data?.credentials.length} 个凭据）
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
-                  >
-                    下一页
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+          <TabsContent value="models">
+            <ModelsPage />
+          </TabsContent>
+        </Tabs>
       </main>
 
       {/* 余额对话框 */}

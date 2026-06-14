@@ -45,6 +45,8 @@
 - **Admin 管理**: 可选的 Web 管理界面和 API，支持凭据管理、余额查询等
 - **多级 Region 配置**: 支持全局和凭据级别的 Auth Region / API Region 配置
 - **凭据级代理**: 支持为每个凭据单独配置 HTTP/SOCKS5 代理，优先级：凭据代理 > 全局代理 > 无代理
+- **智能账号过滤**: 基于模型自动过滤支持该模型的账号，优化请求路由 🆕
+- **模型管理**: 支持查看和刷新所有账号的模型列表，实时同步可用模型 🆕
 
 ---
 
@@ -454,9 +456,13 @@ RUST_LOG=debug ./target/release/kiro-rs
   - `POST /api/admin/credentials/:id/priority` - 设置凭据优先级
   - `POST /api/admin/credentials/:id/reset` - 重置失败计数
   - `GET /api/admin/credentials/:id/balance` - 获取凭据余额
+  - `GET /api/admin/models` - 获取所有模型列表 🆕
+  - `POST /api/admin/models/refresh` - 刷新所有账号的模型列表 🆕
+  - `POST /api/admin/models/refresh/:account_id` - 刷新指定账号的模型列表 🆕
 
 - **Admin UI**
   - `GET /admin` - 访问管理页面（需要在编译前构建 `admin-ui/dist`）
+  - 模型管理标签页 - 查看和刷新所有账号的可用模型 🆕
 
 ## 注意事项
 

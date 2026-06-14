@@ -15,7 +15,9 @@ pub struct ModelMetadata {
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct PricingInfo {
+    #[serde(rename(serialize = "input", deserialize = "input_per_1m"))]
     pub input_per_1m: f64,
+    #[serde(rename(serialize = "output", deserialize = "output_per_1m"))]
     pub output_per_1m: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_write_per_1m: Option<f64>,
@@ -62,5 +64,21 @@ mod tests {
 
         let json = serde_json::to_string_pretty(&metadata).unwrap();
         assert!(json.contains("claude-opus-4.8"));
+        assert!(json.contains(r#""input": 15.0"#));
+        assert!(json.contains(r#""output": 75.0"#));
+    }
+
+    #[test]
+    fn test_load_static_metadata() {
+        let collection = StaticMetadataCollection::load_embedded();
+        assert!(collection.is_ok(), "Failed to load static metadata: {:?}", collection.err());
+
+        let collection = collection.unwrap();
+        assert!(!collection.models.is_empty(), "Static metadata should contain models");
+
+        // 验证第一个模型有定价信息
+        if let Some(first_model) = collection.models.first() {
+            assert!(first_model.pricing.is_some(), "First model should have pricing info");
+        }
     }
 }

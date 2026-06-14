@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::kiro::model::credentials::KiroCredentials;
 use crate::kiro::token_manager::MultiTokenManager;
+use crate::kiro::ModelService;
 
 use super::error::AdminServiceError;
 use super::types::{
@@ -38,6 +39,8 @@ pub struct AdminService {
     cache_path: Option<PathBuf>,
     /// 已注册的端点名称集合（用于 add_credential 校验）
     known_endpoints: HashSet<String>,
+    /// 模型服务（可选）
+    model_service: Option<Arc<ModelService>>,
 }
 
 impl AdminService {
@@ -56,7 +59,14 @@ impl AdminService {
             balance_cache: Mutex::new(balance_cache),
             cache_path,
             known_endpoints: known_endpoints.into_iter().collect(),
+            model_service: None,
         }
+    }
+
+    /// 设置 ModelService
+    pub fn with_model_service(mut self, service: Arc<ModelService>) -> Self {
+        self.model_service = Some(service);
+        self
     }
 
     /// 获取所有凭据状态
@@ -452,6 +462,44 @@ impl AdminService {
             AdminServiceError::InvalidCredential(msg)
         } else {
             AdminServiceError::InternalError(msg)
+        }
+    }
+
+    // ============ 模型管理 ============
+
+    /// 获取所有模型列表
+    pub fn get_models(&self) -> Result<Vec<crate::kiro::model::EnrichedModel>, AdminServiceError> {
+        match &self.model_service {
+            Some(service) => Ok(service.get_models()),
+            None => Err(AdminServiceError::InternalError(
+                "模型服务未初始化".to_string(),
+            )),
+        }
+    }
+
+    /// 刷新所有账号的模型列表
+    pub async fn refresh_all_models(&self) -> Result<(usize, usize), AdminServiceError> {
+        match &self.model_service {
+            Some(service) => service
+                .refresh_all_accounts()
+                .await
+                .map_err(|e| AdminServiceError::InternalError(e.to_string())),
+            None => Err(AdminServiceError::InternalError(
+                "模型服务未初始化".to_string(),
+            )),
+        }
+    }
+
+    /// 刷新指定账号的模型列表
+    pub async fn refresh_account_models(&self, account_id: u64) -> Result<usize, AdminServiceError> {
+        match &self.model_service {
+            Some(service) => service
+                .refresh_account(account_id)
+                .await
+                .map_err(|e| AdminServiceError::InternalError(e.to_string())),
+            None => Err(AdminServiceError::InternalError(
+                "模型服务未初始化".to_string(),
+            )),
         }
     }
 }

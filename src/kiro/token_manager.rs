@@ -526,6 +526,8 @@ pub struct MultiTokenManager {
     last_stats_save_at: Mutex<Option<Instant>>,
     /// 统计数据是否有未落盘更新
     stats_dirty: AtomicBool,
+    /// 模型服务（可选）- 用于按模型过滤账号
+    model_service: Mutex<Option<std::sync::Arc<crate::kiro::ModelService>>>,
 }
 
 /// 每个凭据最大 API 调用失败次数
@@ -655,6 +657,7 @@ impl MultiTokenManager {
             load_balancing_mode: Mutex::new(load_balancing_mode),
             last_stats_save_at: Mutex::new(None),
             stats_dirty: AtomicBool::new(false),
+            model_service: Mutex::new(None),
         };
 
         // 如果有新分配的 ID 或新生成的 machineId，立即持久化到配置文件
@@ -677,6 +680,12 @@ impl MultiTokenManager {
         &self.config
     }
 
+    /// 设置模型服务（用于按模型过滤账号）
+    pub fn set_model_service(&self, service: std::sync::Arc<crate::kiro::ModelService>) {
+        let mut model_service = self.model_service.lock();
+        *model_service = Some(service);
+    }
+
     /// 获取凭据总数
     pub fn total_count(&self) -> usize {
         self.entries.lock().len()
@@ -697,10 +706,43 @@ impl MultiTokenManager {
     fn select_next_credential(&self, model: Option<&str>) -> Option<(u64, KiroCredentials)> {
         let entries = self.entries.lock();
 
-        // 检查是否是 opus 模型
+        // 检查是否是 opus 模型（优化：只在需要时执行小写转换）
         let is_opus = model
-            .map(|m| m.to_lowercase().contains("opus"))
+            .map(|m| m.contains("opus") || m.contains("Opus"))
             .unwrap_or(false);
+
+        // 如果有 ModelService 且提供了模型名，尝试从模型服务获取支持该模型的账号列表
+        let allowed_account_ids = if let Some(ref model_name) = model {
+            let model_service = self.model_service.lock();
+            if let Some(service) = model_service.as_ref() {
+                let accounts = service.get_accounts_for_model(model_name);
+                if !accounts.is_empty() {
+                    tracing::debug!(
+                        "Model {} is supported by {} accounts",
+                        model_name,
+                        accounts.len()
+                    );
+                    // 使用 HashSet 以支持大量账号场景（10+ 账号）
+                    // 对于 50-60 个账号，HashSet 的 O(1) 查找远快于 Vec 的 O(n)
+                    Some(
+                        accounts
+                            .into_iter()
+                            .filter_map(|id_str| id_str.parse::<u64>().ok())
+                            .collect::<std::collections::HashSet<_>>(),
+                    )
+                } else {
+                    tracing::debug!(
+                        "No accounts found for model {} in ModelService, using fallback filter",
+                        model_name
+                    );
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         // 过滤可用凭据
         let available: Vec<_> = entries
@@ -709,7 +751,13 @@ impl MultiTokenManager {
                 if e.disabled {
                     return false;
                 }
-                // 如果是 opus 模型，需要检查订阅等级
+                // 如果有模型服务返回的账号列表，检查当前账号是否在列表中
+                if let Some(ref allowed_ids) = allowed_account_ids {
+                    if !allowed_ids.contains(&e.id) {
+                        return false;
+                    }
+                }
+                // 回退到基于订阅等级的 opus 过滤（当模型服务不可用或无数据时）
                 if is_opus && !e.credentials.supports_opus() {
                     return false;
                 }
@@ -1876,6 +1924,15 @@ impl MultiTokenManager {
     /// 获取负载均衡模式（Admin API）
     pub fn get_load_balancing_mode(&self) -> String {
         self.load_balancing_mode.lock().clone()
+    }
+
+    /// 获取指定账号的凭据（用于模型服务）
+    pub fn get_credentials_by_id(&self, id: u64) -> Option<KiroCredentials> {
+        let entries = self.entries.lock();
+        entries
+            .iter()
+            .find(|e| e.id == id)
+            .map(|e| e.credentials.clone())
     }
 
     fn persist_load_balancing_mode(&self, mode: &str) -> anyhow::Result<()> {

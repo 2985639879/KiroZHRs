@@ -12,6 +12,7 @@ use axum::{
 
 use crate::common::auth;
 use crate::kiro::provider::KiroProvider;
+use crate::kiro::ModelService;
 
 use super::types::ErrorResponse;
 
@@ -25,6 +26,8 @@ pub struct AppState {
     pub kiro_provider: Option<Arc<KiroProvider>>,
     /// 是否开启非流式响应的 thinking 块提取
     pub extract_thinking: bool,
+    /// 模型服务（可选）
+    pub model_service: Option<Arc<ModelService>>,
 }
 
 impl AppState {
@@ -34,12 +37,19 @@ impl AppState {
             api_key: api_key.into(),
             kiro_provider: None,
             extract_thinking,
+            model_service: None,
         }
     }
 
     /// 设置 KiroProvider
     pub fn with_kiro_provider(mut self, provider: KiroProvider) -> Self {
         self.kiro_provider = Some(Arc::new(provider));
+        self
+    }
+
+    /// 设置 ModelService
+    pub fn with_model_service(mut self, service: Arc<ModelService>) -> Self {
+        self.model_service = Some(service);
         self
     }
 }

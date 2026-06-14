@@ -1,5 +1,7 @@
 //! Anthropic API 路由配置
 
+use std::sync::Arc;
+
 use axum::{
     Router,
     extract::DefaultBodyLimit,
@@ -8,6 +10,7 @@ use axum::{
 };
 
 use crate::kiro::provider::KiroProvider;
+use crate::kiro::ModelService;
 
 use super::{
     handlers::{count_tokens, get_models, post_messages, post_messages_cc},
@@ -39,9 +42,22 @@ pub fn create_router_with_provider(
     kiro_provider: Option<KiroProvider>,
     extract_thinking: bool,
 ) -> Router {
+    create_router_with_provider_and_model_service(api_key, kiro_provider, extract_thinking, None)
+}
+
+/// 创建带有 KiroProvider 和 ModelService 的 Anthropic API 路由
+pub fn create_router_with_provider_and_model_service(
+    api_key: impl Into<String>,
+    kiro_provider: Option<KiroProvider>,
+    extract_thinking: bool,
+    model_service: Option<Arc<ModelService>>,
+) -> Router {
     let mut state = AppState::new(api_key, extract_thinking);
     if let Some(provider) = kiro_provider {
         state = state.with_kiro_provider(provider);
+    }
+    if let Some(service) = model_service {
+        state = state.with_model_service(service);
     }
 
     // 需要认证的 /v1 路由

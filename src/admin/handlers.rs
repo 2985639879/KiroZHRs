@@ -140,3 +140,49 @@ pub async fn set_load_balancing_mode(
         Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
     }
 }
+
+/// GET /api/admin/models
+/// 获取所有模型列表
+pub async fn get_models(State(state): State<AdminState>) -> impl IntoResponse {
+    match state.service.get_models() {
+        Ok(models) => Json(serde_json::json!({
+            "models": models,
+            "total": models.len()
+        }))
+        .into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
+/// POST /api/admin/models/refresh
+/// 刷新所有账号的模型列表
+pub async fn refresh_all_models(State(state): State<AdminState>) -> impl IntoResponse {
+    match state.service.refresh_all_models().await {
+        Ok((total, failed)) => Json(serde_json::json!({
+            "success": true,
+            "message": format!("刷新完成: 成功 {} 个账号, 失败 {} 个账号", total, failed),
+            "total_accounts": total,
+            "failed_accounts": failed
+        }))
+        .into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
+/// POST /api/admin/models/refresh/:account_id
+/// 刷新指定账号的模型列表
+pub async fn refresh_account_models(
+    State(state): State<AdminState>,
+    Path(account_id): Path<u64>,
+) -> impl IntoResponse {
+    match state.service.refresh_account_models(account_id).await {
+        Ok(count) => Json(serde_json::json!({
+            "success": true,
+            "message": format!("账号 {} 刷新成功，获取 {} 个模型", account_id, count),
+            "account_id": account_id,
+            "model_count": count
+        }))
+        .into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
