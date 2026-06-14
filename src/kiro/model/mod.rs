@@ -1,0 +1,26 @@
+//! Kiro 数据模型
+//!
+//! 包含 Kiro API 的所有数据类型定义：
+//! - `common`: 共享类型（枚举和辅助结构体）
+//! - `events`: 响应事件类型
+//! - `requests`: 请求类型
+//! - `credentials`: OAuth 凭证
+//! - `token_refresh`: Token 刷新
+//! - `usage_limits`: 使用额度查询
+//! - `model_info`: 模型信息
+//! - `model_metadata`: 静态模型元数据
+
+pub mod common;
+pub mod credentials;
+pub mod enriched_model;
+pub mod events;
+pub mod model_info;
+pub mod model_metadata;
+pub mod requests;
+pub mod token_refresh;
+pub mod usage_limits;
+
+// Public re-exports for convenient access
+pub use enriched_model::EnrichedModel;
+pub use model_info::{ModelInfo, TokenLimits};
+pub use model_metadata::{ModelMetadata, PricingInfo, StaticMetadataCollection};
