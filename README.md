@@ -4,6 +4,14 @@
 
 **本项目基于 [kiro-rs](https://github.com/hank9999/kiro.rs) 二次开发，在原项目基础上新增了智能账号过滤和模型管理功能。**
 
+## 📚 二次开发文档
+
+本项目的新增功能和优化详情请参阅：
+
+- **[新功能使用指南](docs/新功能使用指南.md)** - 智能账号过滤和模型管理的详细使用说明
+- **[性能优化报告](docs/性能优化报告.md)** - 账号过滤缓存、字符串操作优化等性能提升细节
+- **[项目完成总结](docs/项目完成总结.md)** - 完整的功能清单、技术实现和测试验证
+
 ---
 
 ## 免责声明
@@ -37,8 +45,41 @@
 - **智能账号过滤**: 基于模型自动过滤支持该模型的账号，优化请求路由 🆕
 - **模型管理**: 支持查看和刷新所有账号的模型列表，实时同步可用模型 🆕
 
+### 🆕 新增功能详解
+
+#### 智能账号过滤
+
+当发送 API 请求时，系统会：
+1. 自动识别请求中的模型参数（如 `claude-opus-4.5`）
+2. 从模型服务中查询支持该模型的账号列表
+3. 只在支持该模型的账号中进行负载均衡和故障转移
+4. 使用带 TTL 的缓存机制（默认 5 分钟）提升性能
+
+**优势**：
+- 避免将请求发送到不支持该模型的账号，减少无效重试
+- 提高多账号场景下的请求成功率
+- 缓存机制大幅提升响应速度（缓存命中时 95%+ 性能提升）
+
+#### 模型管理
+
+通过 Admin UI 或 API 管理所有账号的模型列表：
+- **查看模型列表**：展示所有账号支持的模型及其详细信息
+- **手动刷新**：点击刷新按钮立即更新指定账号或所有账号的模型列表
+- **自动刷新**：配置后台定时任务（默认 2 小时）自动更新模型列表
+- **模型详情**：查看每个模型的 Token 限制、定价、支持的特性等
+
+**应用场景**：
+- 新模型发布后立即刷新以使用最新模型
+- 账号订阅等级变更后更新可用模型列表
+- 排查某个账号为何无法使用特定模型
+
 ---
 
+- [二次开发文档](#-二次开发文档)
+- [免责声明](#免责声明)
+- [注意](#注意)
+- [功能特性](#功能特性)
+  - [新增功能详解](#-新增功能详解)
 - [开始](#开始)
   - [1. 编译](#1-编译)
   - [2. 最小配置](#2-最小配置)
@@ -183,6 +224,10 @@ docker-compose up
 | `loadBalancingMode` | string | `priority` | 负载均衡模式：`priority`（按优先级）或 `balanced`（均衡分配） |
 | `extractThinking` | boolean | `true` | 非流式响应的 thinking 块提取。启用后 `<thinking>` 标签会被解析为独立的 `thinking` 内容块 |
 | `defaultEndpoint` | string | `ide` | 默认 Kiro 端点。凭据未显式指定 `endpoint` 时使用。当前支持：`ide` |
+| `modelRefresh` | object | - | 模型刷新配置（可选）🆕 |
+| `modelRefresh.enabled` | boolean | `true` | 是否启用后台自动刷新模型列表 🆕 |
+| `modelRefresh.intervalSeconds` | number | `7200` | 自动刷新间隔（秒），默认 2 小时 🆕 |
+| `modelRefresh.accountFilterCacheTtlSeconds` | number | `300` | 账号过滤缓存有效期（秒），默认 5 分钟 🆕 |
 
 完整配置示例：
 
@@ -207,7 +252,12 @@ docker-compose up
    "proxyPassword": "pass",
    "adminApiKey": "sk-admin-your-secret-key",
    "loadBalancingMode": "priority",
-   "extractThinking": true
+   "extractThinking": true,
+   "modelRefresh": {
+      "enabled": true,
+      "intervalSeconds": 7200,
+      "accountFilterCacheTtlSeconds": 300
+   }
 }
 ```
 
@@ -484,8 +534,12 @@ kiro-rs/
 │   │   ├── provider.rs         # API 提供者
 │   │   ├── token_manager.rs    # Token 管理
 │   │   ├── machine_id.rs       # 设备指纹生成
+│   │   ├── model_service.rs    # 模型管理服务 🆕
+│   │   ├── model_service_tests.rs # 模型服务测试 🆕
 │   │   ├── model/              # 数据模型
 │   │   │   ├── credentials.rs  # OAuth 凭证
+│   │   │   ├── model_info.rs   # 模型信息结构 🆕
+│   │   │   ├── enriched_model.rs # 富化模型数据 🆕
 │   │   │   ├── events/         # 响应事件类型
 │   │   │   ├── requests/       # 请求类型
 │   │   │   ├── common/         # 共享类型
@@ -509,6 +563,15 @@ kiro-rs/
 │   └── common/                 # 公共模块
 │       └── auth.rs             # 认证工具函数
 ├── admin-ui/                   # Admin UI 前端工程（构建产物会嵌入二进制）
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── models-page.tsx # 模型管理页面 🆕
+│   │   │   └── ...             # 其他组件
+│   │   └── ...
+├── docs/                       # 二次开发文档 🆕
+│   ├── 新功能使用指南.md         # 使用说明 🆕
+│   ├── 性能优化报告.md          # 性能优化细节 🆕
+│   └── 项目完成总结.md          # 完整功能清单 🆕
 ├── tools/                      # 辅助工具
 ├── Cargo.toml                  # 项目配置
 ├── config.example.json         # 配置示例
