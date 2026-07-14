@@ -2,12 +2,13 @@ services:
   kiro-rs:
     # 使用国内镜像
     # image: ghcr.nju.edu.cn/${IMAGE_OWNER:-hank9999}/kiro-rs:${IMAGE_TAG:-latest}
-    image: ghcr.io/${IMAGE_OWNER:-hank9999}/kiro-rs:${IMAGE_TAG:-latest}
-    container_name: kiro-rs
+    build: .
+    image: kiro-zhrs:local
+    container_name: kiro-zhrs
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8990:8990"
+      - "3200:3200"
     volumes:
       - ./config/:/app/config/
     restart: unless-stopped

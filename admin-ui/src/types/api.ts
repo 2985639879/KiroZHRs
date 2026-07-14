@@ -17,6 +17,9 @@ export interface CredentialStatusItem {
   authMethod: string | null
   hasProfileArn: boolean
   email?: string
+  region?: string
+  authRegion?: string
+  apiRegion?: string
   refreshTokenHash?: string
   apiKeyHash?: string
   maskedApiKey?: string

@@ -36,6 +36,14 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
 
   const { mutate, isPending } = useAddCredential()
 
+  // 切换认证方式时，API Key 默认设置 endpoint 为 ide
+  const handleAuthMethodChange = (method: AuthMethod) => {
+    setAuthMethod(method)
+    if (method === 'api_key' && !endpoint) {
+      setEndpoint('ide')
+    }
+  }
+
   const resetForm = () => {
     setRefreshToken('')
     setKiroApiKey('')
@@ -121,7 +129,7 @@ export function AddCredentialDialog({ open, onOpenChange }: AddCredentialDialogP
               <select
                 id="authMethod"
                 value={authMethod}
-                onChange={(e) => setAuthMethod(e.target.value as AuthMethod)}
+                onChange={(e) => handleAuthMethodChange(e.target.value as AuthMethod)}
                 disabled={isPending}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               >

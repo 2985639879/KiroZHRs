@@ -90,6 +90,9 @@ impl AdminService {
                 api_key_hash: entry.api_key_hash,
                 masked_api_key: entry.masked_api_key,
                 email: entry.email,
+                region: entry.region,
+                auth_region: entry.auth_region,
+                api_region: entry.api_region,
                 success_count: entry.success_count,
                 last_used_at: entry.last_used_at.clone(),
                 has_proxy: entry.has_proxy,
@@ -100,14 +103,13 @@ impl AdminService {
             })
             .collect();
 
-        // 按优先级排序（数字越小优先级越高）
         credentials.sort_by_key(|c| c.priority);
 
         CredentialsStatusResponse {
+            credentials,
+            current_id: snapshot.current_id,
             total: snapshot.total,
             available: snapshot.available,
-            current_id: snapshot.current_id,
-            credentials,
         }
     }
 
@@ -309,6 +311,9 @@ impl AdminService {
                 req.priority,
                 req.disabled,
                 req.email,
+                req.region,
+                req.auth_region,
+                req.api_region,
                 req.proxy_url,
                 req.proxy_username,
                 req.proxy_password,

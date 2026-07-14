@@ -23,6 +23,7 @@ import {
   useDeleteCredential,
   useForceRefreshToken,
 } from '@/hooks/use-credentials'
+import { EditCredentialDialog } from './edit-credential-dialog'
 
 interface CredentialCardProps {
   credential: CredentialStatusItem
@@ -315,6 +316,7 @@ export function CredentialCard({
               <RefreshCw className={`h-4 w-4 mr-1 ${forceRefresh.isPending ? 'animate-spin' : ''}`} />
               刷新 Token
             </Button>
+            <EditCredentialDialog credential={credential} />
             <Button
               size="sm"
               variant="outline"

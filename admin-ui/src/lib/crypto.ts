@@ -3,7 +3,7 @@
  * @param input 输入字符串
  * @returns MD5 哈希值（32 位小写十六进制字符串）
  */
-export async function md5(input: string): Promise<string> {
+export function md5(input: string): string {
   // 使用简单的 MD5 实现（用于浏览器环境）
   return md5Simple(input)
 }

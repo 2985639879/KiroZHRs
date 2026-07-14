@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
-import { Pencil } from 'lucide-react'
+import { Pencil, Download } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -40,8 +40,37 @@ export function EditCredentialDialog({ credential }: EditCredentialDialogProps) 
   const [proxyPassword, setProxyPassword] = useState('')
   const [endpoint, setEndpoint] = useState('')
   const [subscriptionTitle, setSubscriptionTitle] = useState('')
+  const [showRegionDialog, setShowRegionDialog] = useState(false)
+  const [ssoUrl, setSsoUrl] = useState('')
 
   const updateCredential = useUpdateCredential()
+
+  // 提取区域信息的函数
+  const extractRegionFromSSO = (url: string): string | null => {
+    // 匹配格式：https://{instance-id}.portal.{region}.app.aws/
+    const match = url.match(/\.portal\.([a-z0-9-]+)\.app\.aws/i)
+    return match ? match[1] : null
+  }
+
+  // 一键获取区域
+  const handleAutoFillRegion = () => {
+    if (!ssoUrl.trim()) {
+      toast.error('请输入 AWS SSO Portal URL')
+      return
+    }
+
+    const extractedRegion = extractRegionFromSSO(ssoUrl)
+    if (extractedRegion) {
+      setApiRegion(extractedRegion)
+      setRegion(extractedRegion)
+      setAuthRegion(extractedRegion)
+      toast.success(`已自动填入区域：${extractedRegion}`)
+      setShowRegionDialog(false)
+      setSsoUrl('')
+    } else {
+      toast.error('无法从 URL 中提取区域信息，请检查 URL 格式')
+    }
+  }
 
   // 初始化表单值
   useEffect(() => {
@@ -49,12 +78,12 @@ export function EditCredentialDialog({ credential }: EditCredentialDialogProps) 
       setEmail(credential.email || '')
       setKiroApiKey('') // 出于安全考虑，不显示现有的 API Key
       setAuthMethod(credential.authMethod || 'social')
-      setRegion('')
-      setAuthRegion('')
-      setApiRegion('')
+      setRegion('') // 后端不返回此字段，留空
+      setAuthRegion('') // 后端不返回此字段，留空
+      setApiRegion('') // 后端不返回此字段，留空
       setProxyUrl(credential.proxyUrl || '')
-      setProxyUsername('')
-      setProxyPassword('')
+      setProxyUsername('') // 出于安全考虑，不显示现有用户名
+      setProxyPassword('') // 出于安全考虑，不显示现有密码
       setEndpoint(credential.endpoint || '')
       setSubscriptionTitle(credential.subscriptionTitle || '')
     }
@@ -160,35 +189,49 @@ export function EditCredentialDialog({ credential }: EditCredentialDialogProps) 
           )}
 
           {/* 区域配置 */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="region">Region</Label>
-              <Input
-                id="region"
-                value={region}
-                onChange={(e) => setRegion(e.target.value)}
-                placeholder="us-east-1"
-              />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>区域配置</Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setShowRegionDialog(true)}
+              >
+                <Download className="h-4 w-4 mr-1" />
+                一键获取区域
+              </Button>
             </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="region">Region</Label>
+                <Input
+                  id="region"
+                  value={region}
+                  onChange={(e) => setRegion(e.target.value)}
+                  placeholder="us-east-1"
+                />
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="authRegion">Auth Region</Label>
-              <Input
-                id="authRegion"
-                value={authRegion}
-                onChange={(e) => setAuthRegion(e.target.value)}
-                placeholder="us-east-1"
-              />
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="authRegion">Auth Region</Label>
+                <Input
+                  id="authRegion"
+                  value={authRegion}
+                  onChange={(e) => setAuthRegion(e.target.value)}
+                  placeholder="us-east-1"
+                />
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="apiRegion">API Region</Label>
-              <Input
-                id="apiRegion"
-                value={apiRegion}
-                onChange={(e) => setApiRegion(e.target.value)}
-                placeholder="us-east-1"
-              />
+              <div className="space-y-2">
+                <Label htmlFor="apiRegion">API Region</Label>
+                <Input
+                  id="apiRegion"
+                  value={apiRegion}
+                  onChange={(e) => setApiRegion(e.target.value)}
+                  placeholder="us-east-1"
+                />
+              </div>
             </div>
           </div>
 
@@ -250,6 +293,43 @@ export function EditCredentialDialog({ credential }: EditCredentialDialogProps) 
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {/* 一键获取区域弹窗 */}
+      <Dialog open={showRegionDialog} onOpenChange={setShowRegionDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>一键获取区域</DialogTitle>
+            <DialogDescription>
+              输入 AWS SSO Portal URL，自动提取区域配置
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="ssoUrl">AWS SSO Portal URL</Label>
+              <Input
+                id="ssoUrl"
+                value={ssoUrl}
+                onChange={(e) => setSsoUrl(e.target.value)}
+                placeholder="https://xxx.portal.eu-central-1.app.aws/"
+              />
+              <p className="text-xs text-muted-foreground">
+                示例：https://ssoins-xxxx.portal.eu-central-1.app.aws/
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setShowRegionDialog(false)
+              setSsoUrl('')
+            }}>
+              取消
+            </Button>
+            <Button onClick={handleAutoFillRegion}>
+              提取区域
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }

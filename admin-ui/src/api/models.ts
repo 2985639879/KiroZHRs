@@ -11,7 +11,7 @@ const api = axios.create({
 })
 
 // 请求拦截器添加 API Key（MD5 哈希）
-api.interceptors.request.use(async (config) => {
+api.interceptors.request.use((config) => {
   const apiKey = storage.getApiKey()
   if (apiKey) {
     // 发送 API Key 的 MD5 哈希而不是明文

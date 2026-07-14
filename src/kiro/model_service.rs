@@ -102,6 +102,7 @@ impl ModelService {
         // 调用 API 获取模型列表，如果失败则尝试刷新token后重试
         let models = match list_available_models(
             &credentials,
+            self.token_manager.config(),
             proxy_config.as_ref(),
             self.config.tls_backend,
         )
@@ -109,7 +110,17 @@ impl ModelService {
         {
             Ok(models) => models,
             Err(e) => {
-                // 检查是否是认证错误（403）
+                // API Key 账号不支持 token 刷新
+                if credentials.is_api_key_credential() {
+                    tracing::warn!(
+                        "Account {} (API Key) failed to fetch models: {}",
+                        account_id,
+                        e
+                    );
+                    return Err(e);
+                }
+
+                // OAuth 账号：检查是否是认证错误（403），如果是则尝试刷新 token
                 let error_msg = e.to_string();
                 if error_msg.contains("403") || error_msg.contains("Forbidden") {
                     tracing::info!(
@@ -136,8 +147,13 @@ impl ModelService {
 
                     // 重试获取模型列表
                     tracing::info!("Retrying to fetch models for account {}", account_id);
-                    list_available_models(&credentials, proxy_config.as_ref(), self.config.tls_backend)
-                        .await?
+                    list_available_models(
+                        &credentials,
+                        self.token_manager.config(),
+                        proxy_config.as_ref(),
+                        self.config.tls_backend,
+                    )
+                    .await?
                 } else {
                     return Err(e);
                 }

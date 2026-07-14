@@ -8,6 +8,7 @@ import {
   getCredentialBalance,
   addCredential,
   deleteCredential,
+  updateCredential,
   getLoadBalancingMode,
   setLoadBalancingMode,
 } from '@/api/credentials'
@@ -123,18 +124,7 @@ export function useSetLoadBalancingMode() {
 export function useUpdateCredential() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (data: Record<string, unknown>) => {
-      const response = await fetch(`/admin/credentials/${data.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || '更新失败')
-      }
-      return response.json()
-    },
+    mutationFn: updateCredential,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['credentials'] })
     },

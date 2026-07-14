@@ -208,10 +208,11 @@ impl KiroCredentials {
     }
 
     /// 获取有效的 API Region（用于 API 请求）
-    /// 优先级：凭据.api_region > config.api_region > config.region
+    /// 优先级：凭据.api_region > 凭据.region > config.api_region > config.region > us-east-1
     pub fn effective_api_region<'a>(&'a self, config: &'a Config) -> &'a str {
         self.api_region
             .as_deref()
+            .or(self.region.as_deref())
             .unwrap_or(config.effective_api_region())
     }
 

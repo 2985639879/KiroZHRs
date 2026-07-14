@@ -218,7 +218,23 @@ impl KiroProvider {
 
             // 401/403 凭据问题
             if matches!(status.as_u16(), 401 | 403) {
-                // token 被上游失效：先尝试 force-refresh，每凭据仅一次机会
+                // API Key 凭据不支持 token 刷新，直接标记失败
+                if ctx.credentials.is_api_key_credential() {
+                    tracing::warn!(
+                        "凭据 #{} (API Key) 认证失败: {} {}",
+                        ctx.id,
+                        status,
+                        body
+                    );
+                    let has_available = self.token_manager.report_failure(ctx.id);
+                    if !has_available {
+                        anyhow::bail!("MCP 请求失败（所有凭据已用尽）: {} {}", status, body);
+                    }
+                    last_error = Some(anyhow::anyhow!("MCP 请求失败: {} {}", status, body));
+                    continue;
+                }
+
+                // OAuth 凭据：token 被上游失效时，尝试 force-refresh（每凭据仅一次机会）
                 if endpoint.is_bearer_token_invalid(&body) && !force_refreshed.contains(&ctx.id) {
                     force_refreshed.insert(ctx.id);
                     tracing::info!("凭据 #{} token 疑似被上游失效，尝试强制刷新", ctx.id);
@@ -404,7 +420,33 @@ impl KiroProvider {
                     body
                 );
 
-                // token 被上游失效：先尝试 force-refresh，每凭据仅一次机会
+                // API Key 凭据不支持 token 刷新，直接标记失败
+                if ctx.credentials.is_api_key_credential() {
+                    tracing::warn!(
+                        "凭据 #{} (API Key) 认证失败: {} {}",
+                        ctx.id,
+                        status,
+                        body
+                    );
+                    let has_available = self.token_manager.report_failure(ctx.id);
+                    if !has_available {
+                        anyhow::bail!(
+                            "{} API 请求失败（所有凭据已用尽）: {} {}",
+                            api_type,
+                            status,
+                            body
+                        );
+                    }
+                    last_error = Some(anyhow::anyhow!(
+                        "{} API 请求失败: {} {}",
+                        api_type,
+                        status,
+                        body
+                    ));
+                    continue;
+                }
+
+                // OAuth 凭据：token 被上游失效时，尝试 force-refresh（每凭据仅一次机会）
                 if endpoint.is_bearer_token_invalid(&body) && !force_refreshed.contains(&ctx.id) {
                     force_refreshed.insert(ctx.id);
                     tracing::info!("凭据 #{} token 疑似被上游失效，尝试强制刷新", ctx.id);

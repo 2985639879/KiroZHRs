@@ -20,7 +20,7 @@ const api = axios.create({
 })
 
 // 请求拦截器添加 API Key（MD5 哈希）
-api.interceptors.request.use(async (config) => {
+api.interceptors.request.use((config) => {
   const apiKey = storage.getApiKey()
   if (apiKey) {
     // 发送 API Key 的 MD5 哈希而不是明文
@@ -93,6 +93,15 @@ export async function addCredential(
 // 删除凭据
 export async function deleteCredential(id: number): Promise<SuccessResponse> {
   const { data } = await api.delete<SuccessResponse>(`/credentials/${id}`)
+  return data
+}
+
+// 更新凭据
+export async function updateCredential(
+  updateData: Record<string, unknown>
+): Promise<SuccessResponse> {
+  const id = updateData.id
+  const { data } = await api.put<SuccessResponse>(`/credentials/${id}`, updateData)
   return data
 }
 

@@ -46,6 +46,15 @@ pub struct CredentialStatusItem {
     pub masked_api_key: Option<String>,
     /// 用户邮箱（用于前端显示）
     pub email: Option<String>,
+    /// Region（用于前端显示和编辑）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// Auth Region（用于前端显示和编辑）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_region: Option<String>,
+    /// API Region（用于前端显示和编辑）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_region: Option<String>,
     /// API 调用成功次数
     pub success_count: u64,
     /// 最后一次 API 调用时间（RFC3339 格式）
@@ -94,6 +103,15 @@ pub struct UpdateCredentialRequest {
 
     /// 用户邮箱（可选）
     pub email: Option<String>,
+
+    /// Region（可选）
+    pub region: Option<String>,
+
+    /// Auth Region（可选）
+    pub auth_region: Option<String>,
+
+    /// API Region（可选）
+    pub api_region: Option<String>,
 
     /// 凭据级代理 URL（可选，特殊值 "direct" 表示不使用代理）
     pub proxy_url: Option<String>,

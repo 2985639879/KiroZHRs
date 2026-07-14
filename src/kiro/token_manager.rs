@@ -470,6 +470,15 @@ pub struct CredentialEntrySnapshot {
     pub masked_api_key: Option<String>,
     /// 用户邮箱（用于前端显示）
     pub email: Option<String>,
+    /// Region（用于前端显示和编辑）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// Auth Region（用于前端显示和编辑）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_region: Option<String>,
+    /// API Region（用于前端显示和编辑）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_region: Option<String>,
     /// API 调用成功次数
     pub success_count: u64,
     /// 最后一次 API 调用时间（RFC3339 格式）
@@ -1488,6 +1497,9 @@ impl MultiTokenManager {
                         None
                     },
                     email: e.credentials.email.clone(),
+                    region: e.credentials.region.clone(),
+                    auth_region: e.credentials.auth_region.clone(),
+                    api_region: e.credentials.api_region.clone(),
                     success_count: e.success_count,
                     last_used_at: e.last_used_at.clone(),
                     has_proxy: e.credentials.proxy_url.is_some(),
@@ -1587,6 +1599,9 @@ impl MultiTokenManager {
         priority: Option<u32>,
         disabled: Option<bool>,
         email: Option<String>,
+        region: Option<String>,
+        auth_region: Option<String>,
+        api_region: Option<String>,
         proxy_url: Option<String>,
         proxy_username: Option<String>,
         proxy_password: Option<String>,
@@ -1625,6 +1640,17 @@ impl MultiTokenManager {
             // 更新用户邮箱
             if let Some(new_email) = email {
                 entry.credentials.email = Some(new_email);
+            }
+
+            // 更新区域配置
+            if let Some(new_region) = region {
+                entry.credentials.region = Some(new_region);
+            }
+            if let Some(new_auth_region) = auth_region {
+                entry.credentials.auth_region = Some(new_auth_region);
+            }
+            if let Some(new_api_region) = api_region {
+                entry.credentials.api_region = Some(new_api_region);
             }
 
             // 更新代理配置
