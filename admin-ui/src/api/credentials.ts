@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { storage } from '@/lib/storage'
+import { md5 } from '@/lib/crypto'
 import type {
   CredentialsStatusResponse,
   BalanceResponse,
@@ -18,11 +19,13 @@ const api = axios.create({
   },
 })
 
-// 请求拦截器添加 API Key
-api.interceptors.request.use((config) => {
+// 请求拦截器添加 API Key（MD5 哈希）
+api.interceptors.request.use(async (config) => {
   const apiKey = storage.getApiKey()
   if (apiKey) {
-    config.headers['x-api-key'] = apiKey
+    // 发送 API Key 的 MD5 哈希而不是明文
+    const hashedKey = md5(apiKey)
+    config.headers['x-api-key'] = hashedKey
   }
   return config
 })

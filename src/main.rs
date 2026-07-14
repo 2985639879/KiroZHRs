@@ -281,6 +281,22 @@ async fn main() {
         tracing::info!("  GET  /admin");
     }
 
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            tracing::error!("无法绑定端口 {}: {}", addr, e);
+            if e.kind() == std::io::ErrorKind::AddrInUse {
+                tracing::error!("端口 {} 已被占用，请检查：", config.port);
+                tracing::error!("  1. 是否有其他 Kiro 实例正在运行");
+                tracing::error!("  2. 使用 'lsof -i :{}' (Linux/Mac) 或 'netstat -ano | findstr {}' (Windows) 查看占用进程", config.port, config.port);
+                tracing::error!("  3. 修改配置文件中的 listenAddr 使用其他端口");
+            }
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = axum::serve(listener, app).await {
+        tracing::error!("服务器运行错误: {}", e);
+        std::process::exit(1);
+    }
 }
