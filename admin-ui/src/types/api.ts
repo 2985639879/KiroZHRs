@@ -27,6 +27,7 @@ export interface CredentialStatusItem {
   refreshFailureCount: number
   disabledReason?: string
   endpoint: string
+  subscriptionTitle?: string
 }
 
 // 余额响应
