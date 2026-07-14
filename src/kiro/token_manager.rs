@@ -1577,6 +1577,83 @@ impl MultiTokenManager {
         Ok(())
     }
 
+    /// 更新凭据信息（Admin API）
+    ///
+    /// 支持更新 priority, disabled, email, proxy 配置, endpoint 等字段。
+    /// 如果修改了优先级，会立即按新优先级重新选择当前凭据。
+    pub fn update_credential(
+        &self,
+        id: u64,
+        priority: Option<u32>,
+        disabled: Option<bool>,
+        email: Option<String>,
+        proxy_url: Option<String>,
+        proxy_username: Option<String>,
+        proxy_password: Option<String>,
+        endpoint: Option<String>,
+    ) -> anyhow::Result<()> {
+        let mut priority_changed = false;
+
+        {
+            let mut entries = self.entries.lock();
+            let entry = entries
+                .iter_mut()
+                .find(|e| e.id == id)
+                .ok_or_else(|| anyhow::anyhow!("凭据不存在: {}", id))?;
+
+            // 更新优先级
+            if let Some(new_priority) = priority {
+                if entry.credentials.priority != new_priority {
+                    entry.credentials.priority = new_priority;
+                    priority_changed = true;
+                }
+            }
+
+            // 更新禁用状态
+            if let Some(new_disabled) = disabled {
+                entry.disabled = new_disabled;
+                if !new_disabled {
+                    // 启用时重置失败计数
+                    entry.failure_count = 0;
+                    entry.refresh_failure_count = 0;
+                    entry.disabled_reason = None;
+                } else {
+                    entry.disabled_reason = Some(DisabledReason::Manual);
+                }
+            }
+
+            // 更新用户邮箱
+            if let Some(new_email) = email {
+                entry.credentials.email = Some(new_email);
+            }
+
+            // 更新代理配置
+            if let Some(new_proxy_url) = proxy_url {
+                entry.credentials.proxy_url = Some(new_proxy_url);
+            }
+            if let Some(new_proxy_username) = proxy_username {
+                entry.credentials.proxy_username = Some(new_proxy_username);
+            }
+            if let Some(new_proxy_password) = proxy_password {
+                entry.credentials.proxy_password = Some(new_proxy_password);
+            }
+
+            // 更新端点
+            if let Some(new_endpoint) = endpoint {
+                entry.credentials.endpoint = Some(new_endpoint);
+            }
+        }
+
+        // 如果优先级发生变化，立即重新选择当前凭据
+        if priority_changed {
+            self.select_highest_priority();
+        }
+
+        // 持久化更改
+        self.persist_credentials()?;
+        Ok(())
+    }
+
     /// 获取指定凭据的使用额度（Admin API）
     pub async fn get_usage_limits_for(&self, id: u64) -> anyhow::Result<UsageLimitsResponse> {
         let credentials = {
@@ -2652,5 +2729,164 @@ mod tests {
 
         assert_eq!(credentials.effective_auth_region(&config), "auth-only");
         assert_eq!(credentials.effective_api_region(&config), "api-only");
+    }
+
+    #[tokio::test]
+    async fn test_update_credential_priority() {
+        let config = Config::default();
+
+        let mut cred1 = KiroCredentials::default();
+        cred1.refresh_token = Some("a".repeat(150));
+        cred1.priority = 0;
+
+        let mut cred2 = KiroCredentials::default();
+        cred2.refresh_token = Some("b".repeat(150));
+        cred2.priority = 1;
+
+        let manager = MultiTokenManager::new(config, vec![cred1, cred2], None, None, false).unwrap();
+        let snapshot1 = manager.snapshot();
+        let id1 = snapshot1.entries[0].id;
+
+        // 更新优先级
+        let result = manager.update_credential(id1, Some(10), None, None, None, None, None, None);
+        assert!(result.is_ok());
+
+        // 验证优先级已更新
+        let snapshot2 = manager.snapshot();
+        let updated_entry = snapshot2.entries.iter().find(|e| e.id == id1).unwrap();
+        assert_eq!(updated_entry.priority, 10);
+    }
+
+    #[tokio::test]
+    async fn test_update_credential_disabled() {
+        let config = Config::default();
+
+        let mut cred = KiroCredentials::default();
+        cred.refresh_token = Some("a".repeat(150));
+
+        let manager = MultiTokenManager::new(config, vec![cred], None, None, false).unwrap();
+        let snapshot1 = manager.snapshot();
+        let id = snapshot1.entries[0].id;
+
+        // 禁用凭据
+        let result = manager.update_credential(id, None, Some(true), None, None, None, None, None);
+        assert!(result.is_ok());
+
+        // 验证凭据已禁用
+        let snapshot2 = manager.snapshot();
+        let updated_entry = snapshot2.entries.iter().find(|e| e.id == id).unwrap();
+        assert!(updated_entry.disabled);
+
+        // 重新启用凭据
+        let result = manager.update_credential(id, None, Some(false), None, None, None, None, None);
+        assert!(result.is_ok());
+
+        // 验证凭据已启用且失败计数已重置
+        let snapshot3 = manager.snapshot();
+        let updated_entry = snapshot3.entries.iter().find(|e| e.id == id).unwrap();
+        assert!(!updated_entry.disabled);
+        assert_eq!(updated_entry.failure_count, 0);
+        assert_eq!(updated_entry.refresh_failure_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_update_credential_email() {
+        let config = Config::default();
+
+        let mut cred = KiroCredentials::default();
+        cred.refresh_token = Some("a".repeat(150));
+
+        let manager = MultiTokenManager::new(config, vec![cred], None, None, false).unwrap();
+        let snapshot1 = manager.snapshot();
+        let id = snapshot1.entries[0].id;
+
+        // 更新邮箱
+        let result = manager.update_credential(
+            id,
+            None,
+            None,
+            Some("test@example.com".to_string()),
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_ok());
+
+        // 验证邮箱已更新
+        let snapshot2 = manager.snapshot();
+        let updated_entry = snapshot2.entries.iter().find(|e| e.id == id).unwrap();
+        assert_eq!(updated_entry.email, Some("test@example.com".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_update_credential_proxy() {
+        let config = Config::default();
+
+        let mut cred = KiroCredentials::default();
+        cred.refresh_token = Some("a".repeat(150));
+
+        let manager = MultiTokenManager::new(config, vec![cred], None, None, false).unwrap();
+        let snapshot1 = manager.snapshot();
+        let id = snapshot1.entries[0].id;
+
+        // 更新代理配置
+        let result = manager.update_credential(
+            id,
+            None,
+            None,
+            None,
+            Some("http://proxy:8080".to_string()),
+            Some("user".to_string()),
+            Some("pass".to_string()),
+            None,
+        );
+        assert!(result.is_ok());
+
+        // 验证代理配置已更新
+        let snapshot2 = manager.snapshot();
+        let updated_entry = snapshot2.entries.iter().find(|e| e.id == id).unwrap();
+        assert_eq!(updated_entry.proxy_url, Some("http://proxy:8080".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_update_credential_not_found() {
+        let config = Config::default();
+        let manager = MultiTokenManager::new(config, vec![], None, None, false).unwrap();
+
+        // 尝试更新不存在的凭据
+        let result = manager.update_credential(999, Some(5), None, None, None, None, None, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("凭据不存在"));
+    }
+
+    #[tokio::test]
+    async fn test_update_credential_endpoint() {
+        let config = Config::default();
+
+        let mut cred = KiroCredentials::default();
+        cred.refresh_token = Some("a".repeat(150));
+
+        let manager = MultiTokenManager::new(config, vec![cred], None, None, false).unwrap();
+        let snapshot1 = manager.snapshot();
+        let id = snapshot1.entries[0].id;
+
+        // 更新端点
+        let result = manager.update_credential(
+            id,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("custom-endpoint".to_string()),
+        );
+        assert!(result.is_ok());
+
+        // 验证端点已更新
+        let snapshot2 = manager.snapshot();
+        let updated_entry = snapshot2.entries.iter().find(|e| e.id == id).unwrap();
+        assert_eq!(updated_entry.endpoint, Some("custom-endpoint".to_string()));
     }
 }

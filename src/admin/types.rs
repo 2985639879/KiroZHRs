@@ -82,6 +82,32 @@ pub struct SetPriorityRequest {
     pub priority: u32,
 }
 
+/// 更新凭据请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCredentialRequest {
+    /// 优先级（可选）
+    pub priority: Option<u32>,
+
+    /// 是否禁用（可选）
+    pub disabled: Option<bool>,
+
+    /// 用户邮箱（可选）
+    pub email: Option<String>,
+
+    /// 凭据级代理 URL（可选，特殊值 "direct" 表示不使用代理）
+    pub proxy_url: Option<String>,
+
+    /// 凭据级代理认证用户名（可选）
+    pub proxy_username: Option<String>,
+
+    /// 凭据级代理认证密码（可选）
+    pub proxy_password: Option<String>,
+
+    /// 端点名称（可选）
+    pub endpoint: Option<String>,
+}
+
 /// 添加凭据请求
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

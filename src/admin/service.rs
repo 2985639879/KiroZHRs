@@ -283,6 +283,42 @@ impl AdminService {
         Ok(())
     }
 
+    /// 更新凭据
+    pub fn update_credential(
+        &self,
+        id: u64,
+        req: super::types::UpdateCredentialRequest,
+    ) -> Result<(), AdminServiceError> {
+        // 校验端点名：如果指定则必须已注册
+        if let Some(ref name) = req.endpoint {
+            if !self.known_endpoints.contains(name) {
+                let mut known: Vec<&str> =
+                    self.known_endpoints.iter().map(|s| s.as_str()).collect();
+                known.sort();
+                return Err(AdminServiceError::InvalidCredential(format!(
+                    "未知端点 \"{}\"，已注册端点: {:?}",
+                    name, known
+                )));
+            }
+        }
+
+        // 调用 token_manager 更新凭据
+        self.token_manager
+            .update_credential(
+                id,
+                req.priority,
+                req.disabled,
+                req.email,
+                req.proxy_url,
+                req.proxy_username,
+                req.proxy_password,
+                req.endpoint,
+            )
+            .map_err(|e| self.classify_error(e, id))?;
+
+        Ok(())
+    }
+
     /// 获取负载均衡模式
     pub fn get_load_balancing_mode(&self) -> LoadBalancingModeResponse {
         LoadBalancingModeResponse {
